@@ -10,7 +10,12 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 
 function App() {
-  // Theme state
+  // =========================================================
+  // 1. QUẢN LÝ TRẠNG THÁI (STATE MANAGEMENT)
+  // Quản lý các dữ liệu local, theme, auth và lịch sử sửa chữa
+  // =========================================================
+
+  // Theme state: Lưu lại cấu hình theme (sáng/tối) của người dùng
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('app-theme') as 'light' | 'dark') || 'dark';
   });
@@ -31,7 +36,8 @@ function App() {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Auth & UI state
+  // Auth & UI state: Lưu trữ tài khoản và vai trò (Role)
+  // Vai trò 'admin' sẽ FULL QUYỀN, 'staff' chỉ được XEM và YÊU CẦU.
   const [role, setRole] = useState<'admin' | 'staff'>('staff');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
@@ -64,10 +70,17 @@ function App() {
 
   const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
 
+  // =========================================================
+  // 2. HÀM XỬ LÝ NGHIỆP VỤ (BUSINESS LOGIC)
+  // Các hàm tương tác thêm, sửa, xóa, ghi log theo quyền
+  // =========================================================
+
+  // Hàm ghi lại thao tác của hệ thống (chỉ hiển thị cho Admin)
   const addLog = (msg: string) => {
     setLogs(prev => [{ id: Date.now().toString(), time: new Date().toLocaleString('vi-VN'), msg }, ...prev]);
   };
 
+  // Khởi tạo một form trống để chuẩn bị thêm Mới/Yêu cầu
   const handleAddNew = () => {
     if (activeTab === 'repair') {
       const newRepair: RepairHistory = {
@@ -148,11 +161,20 @@ function App() {
     item.problem.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Lọc dữ liệu theo từ khóa tìm kiếm (Search)
   const filteredPolicies = policies.filter(item =>
     item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
     item.category.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // =========================================================
+  // 3. XỬ LÝ GIAO DIỆN (RENDER UI) VÀ PHÂN QUYỀN TRUY CẬP
+  // Cấu trúc: 
+  // - Nếu chưa login -> Trả về màn hình Login Mockup
+  // - Lọc quyền (Admin vs Staff) để hiện thị View tương ứng
+  // =========================================================
+
+  // MÀN HÌNH ĐĂNG NHẬP / MOCKUP XÁC THỰC
   if (!isAuthenticated) {
     return (
       <div className="app-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
@@ -184,6 +206,7 @@ function App() {
               className="tab-btn active" 
               style={{ width: '100%', marginTop: '1rem', padding: '1rem', justifyContent: 'center', background: 'var(--primary)', borderRadius: '12px' }}
               onClick={() => {
+                // XỬ LÝ PHÂN QUYỀN: Bắt buộc dùng đúng thông tin khởi tạo
                 if(!username || !password) return alert('Vui lòng nhập đủ thông tin!');
                 
                 if (authView === 'login') {
@@ -380,8 +403,12 @@ function App() {
   );
 }
 
-// --- Card Components ---
+// =========================================================
+// 4. DANH SÁCH COMPONENT PHỤ TRỢ (Thẻ hiển thị)
+// Các Component này nhận Props và hiển thị dạng Card UI
+// =========================================================
 
+// Component hiển thị thẻ Lịch sử sửa chữa (Thumbnail Card)
 function RepairCard({ repair, onClick, onEdit }: { repair: RepairHistory, onClick: () => void, onEdit: () => void }) {
   return (
     <div className="card" onClick={onClick}>
@@ -403,6 +430,7 @@ function RepairCard({ repair, onClick, onEdit }: { repair: RepairHistory, onClic
   );
 }
 
+// Component hiển thị thẻ Chính sách nội quy (Thumbnail Policy)
 function PolicyCard({ policy, onClick, onEdit }: { policy: Policy, onClick: () => void, onEdit: () => void }) {
   return (
     <div className="card" onClick={onClick}>
@@ -421,8 +449,12 @@ function PolicyCard({ policy, onClick, onEdit }: { policy: Policy, onClick: () =
   );
 }
 
-// --- Detail Components ---
+// =========================================================
+// 5. COMPONENT XEM CHI TIẾT (POPUP MODAL)
+// Đây là các view chi tiết (Chỉ xem) (Read-only view)
+// =========================================================
 
+// Khung hiển thị Chi tiết một Lịch sử sửa chữa
 function RepairDetail({ repair }: { repair: RepairHistory }) {
   return (
     <div>
@@ -446,6 +478,7 @@ function RepairDetail({ repair }: { repair: RepairHistory }) {
   );
 }
 
+// Khung hiển thị Chi tiết của một quyển Chính sách
 function PolicyDetail({ policy, onAttachmentClick }: { policy: Policy, onAttachmentClick: (e: any, f: string) => void }) {
   return (
     <div>
@@ -460,8 +493,12 @@ function PolicyDetail({ policy, onAttachmentClick }: { policy: Policy, onAttachm
   );
 }
 
-// --- Form Components ---
+// =========================================================
+// 6. COMPONENT NHẬP LIỆU (CÁC FORM ĐIỀN THÔNG TIN)
+// Cho phép Admin lưu trữ hoặc cho Nhân viên tạo Yêu cầu
+// =========================================================
 
+// Biểu mẫu Nhập liệu Lịch sử (Dùng chung cho Tạo mới & Chỉnh sửa tùy theo Role)
 function RepairEditForm({ data, isNew, role, onSave, onCancel }: { data: RepairHistory, isNew?: boolean, role?: string, onSave: (d: RepairHistory) => void, onCancel: () => void }) {
   const [f, setF] = useState({ ...data });
   return (
@@ -483,6 +520,7 @@ function RepairEditForm({ data, isNew, role, onSave, onCancel }: { data: RepairH
   );
 }
 
+// Biểu mẫu Nhập liệu Chính sách Công ty
 function PolicyEditForm({ data, isNew, role, onSave, onCancel }: { data: Policy, isNew?: boolean, role?: string, onSave: (d: Policy) => void, onCancel: () => void }) {
   const [f, setF] = useState({ ...data });
   return (
@@ -506,8 +544,12 @@ function PolicyEditForm({ data, isNew, role, onSave, onCancel }: { data: Policy,
   );
 }
 
-// --- Utils ---
+// =========================================================
+// 7. COMPONENT TIỆN ÍCH (UTILITIES UI)
+// Các wrapper dùng chung (Modal, Hiển thị nhãn...)
+// =========================================================
 
+// Khung Modal trong suốt đè lên màn hình
 function DetailModal({ children, onClose }: { children: React.ReactNode, onClose: () => void }) {
   return (
     <motion.div className="modal-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}>
@@ -519,6 +561,7 @@ function DetailModal({ children, onClose }: { children: React.ReactNode, onClose
   );
 }
 
+// Cấu trúc hiển thị 1 mục nhỏ [Tiêu đề - Giá trị]
 function DetailItem({ label, value, valueStyle }: { label: string, value: string, valueStyle?: any }) {
   return (
     <div>
@@ -528,6 +571,7 @@ function DetailItem({ label, value, valueStyle }: { label: string, value: string
   );
 }
 
+// Vỏ bọc Input có thêm Title cho các Form
 function FormComp({ label, children, fullW }: { label: string, children: React.ReactNode, fullW?: boolean }) {
   return (
     <div style={{ gridColumn: fullW ? '1 / span 2' : 'auto' }}>
