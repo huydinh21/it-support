@@ -1,17 +1,24 @@
+// =========================================================
+// MÔ HÌNH DỮ LIỆU: CHÍNH SÁCH CÔNG TY (POLICIES)
+// Định nghĩa kiểu dữ liệu và Danh sách các chính sách mẫu (Mock Data)
+// =========================================================
+
+// Định nghĩa cấu trúc của một văn bản Chính sách / Nội quy
 export interface Policy {
-  id: string;
-  title: string;
-  category: 'hr' | 'it' | 'safety' | 'finance' | 'general';
-  status: 'active' | 'expired' | 'draft';
-  issuedDate: string;
-  effectiveDate: string;
-  expiryDate?: string;
-  content: string;
-  attachments?: Array<{ name: string; url: string; type: string; }>;
-  createdBy: string;
-  lastUpdated?: string;
+  id: string; // Mã số quản lý chính sách
+  title: string; // Tên tiêu đề chính sách
+  category: 'hr' | 'it' | 'safety' | 'finance' | 'general'; // Phân loại phòng ban (Nhân sự, IT, An toàn...)
+  status: 'active' | 'expired' | 'draft'; // Trạng thái pháp lý: Hiệu lực | Hết hạn | Bản thảo (Chờ duyệt)
+  issuedDate: string; // Ngày ký ban hành
+  effectiveDate: string; // Ngày chính thức áp dụng
+  expiryDate?: string; // Ngày hết hạn (Chính sách thời vụ - Không bắt buộc)
+  content: string; // Chi tiết Nội dung chính sách (Hỗ trợ định dạng thẻ HTML)
+  attachments?: Array<{ name: string; url: string; type: string; }>; // Link File PDF, Word đính kèm (Nội bộ)
+  createdBy: string; // Người/Phòng ban biên soạn
+  lastUpdated?: string; // Thời gian cập nhật nội dung lần cuối
 }
 
+// Khởi tạo danh sách Dữ liệu mẫu (Mock data) ban đầu cho Chính sách
 export const mockPolicies: Policy[] = [
   {
     id: 'POL001',

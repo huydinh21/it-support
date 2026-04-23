@@ -1,22 +1,29 @@
+// =========================================================
+// MÔ HÌNH DỮ LIỆU: LỊCH SỬ SỬA CHỮA (REPAIR HISTORY)
+// Chứa định nghĩa kiểu dữ liệu (Interface) và dữ liệu mẫu ảo (Mock Data)
+// =========================================================
+
+// Định nghĩa cấu trúc của một bản ghi Lịch sử sửa chữa
 export interface RepairHistory {
-  id: string;
-  machineId: string;
-  machineName: string;
-  machineType: string;
-  repairDate: string;
-  repairedBy: string;
-  problem: string;
-  solution: string;
-  cost: number;
-  status: 'completed' | 'in-progress' | 'waiting-parts';
+  id: string; // Mã định danh duy nhất của phiếu sửa chữa
+  machineId: string; // Mã số của thiết bị/máy móc
+  machineName: string; // Tên hiển thị của máy
+  machineType: string; // Chủng loại máy (vd: Máy in, Máy lạnh...)
+  repairDate: string; // Ngày thực hiện sửa chữa (Định dạng YYYY-MM-DD)
+  repairedBy: string; // Kỹ thuật viên phụ trách sửa chữa
+  problem: string; // Mô tả chi tiết vấn đề/lỗi máy gặp phải
+  solution: string; // Cách giải quyết/Khắc phục của kỹ thuật
+  cost: number; // Tổng chi phí sửa chữa (VNĐ)
+  status: 'completed' | 'in-progress' | 'waiting-parts'; // Trạng thái: Hoàn thành | Đang xử lý | Chờ thay linh kiện
   partsReplaced: Array<{
-    name: string;
-    quantity: number;
-    unitPrice: number;
+    name: string; // Tên linh kiện thay thế
+    quantity: number; // Số lượng
+    unitPrice: number; // Đơn giá
   }>;
-  notes?: string;
+  notes?: string; // Ghi chú thêm (Không bắt buộc)
 }
 
+// Khởi tạo danh sách Dữ liệu mẫu (Mock data) ban đầu cho Lịch sử
 export const mockRepairHistory: RepairHistory[] = [
   {
     id: 'RH001',
