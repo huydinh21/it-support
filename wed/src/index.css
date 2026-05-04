@@ -118,7 +118,7 @@ header h1 {
 
 .grid-view {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
   gap: 1.5rem;
 }
 
@@ -162,9 +162,100 @@ header h1 {
   font-weight: 700;
 }
 
+/* === TRẠNG THÁI SỬA CHỮA === */
 .badge-completed { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
 .badge-in-progress { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
 .badge-waiting-parts { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+
+/* === MỨC ĐỘ ƯU TIÊN SLA === */
+.priority-urgent { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+.priority-high    { background: rgba(249, 115, 22, 0.15); color: #f97316; border: 1px solid rgba(249,115,22,0.3); }
+.priority-medium  { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+.priority-low     { background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+
+/* === ĐƯỜNG VIỀN TRÁI TRẠNG THÁI CARD === */
+.card-urgent  { border-left: 4px solid #ef4444 !important; }
+.card-high    { border-left: 4px solid #f97316 !important; }
+.card-medium  { border-left: 4px solid #f59e0b !important; }
+.card-low     { border-left: 4px solid #22c55e !important; }
+
+/* === EMPTY STATE (Màn hình trống) === */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 5rem 2rem;
+  text-align: center;
+  grid-column: 1 / -1;
+}
+.empty-state-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  opacity: 0.4;
+}
+.empty-state h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 0.5rem;
+}
+.empty-state p {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  max-width: 300px;
+}
+
+/* === QR CODE AREA === */
+.qr-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1.5rem;
+  background: var(--bg-main);
+  border: 2px dashed var(--border);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+.qr-box:hover {
+  border-color: var(--primary);
+  background: rgba(59, 130, 246, 0.05);
+}
+.qr-box span {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* === RESPONSIVE MOBILE NÂNG CAO === */
+@media (max-width: 768px) {
+  header {
+    flex-direction: column !important;
+    gap: 1rem;
+    align-items: flex-start !important;
+    margin-bottom: 1.5rem;
+  }
+  header > div:last-child {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .tabs {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .grid-view {
+    grid-template-columns: 1fr;
+  }
+}
 
 .modal-overlay {
   position: fixed;
@@ -248,4 +339,41 @@ select.form-input {
 
 .animate-fadeIn {
   animation: fadeIn 0.4s ease forwards;
+}
+
+/* Responsive Utilities */
+.grid-2-cols {
+  grid-template-columns: 1fr 1fr;
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding: 1rem;
+  }
+  
+  header {
+    margin-bottom: 1.5rem;
+  }
+
+  header h1 {
+    font-size: 1.8rem;
+  }
+  
+  .tabs {
+    flex-wrap: wrap;
+  }
+  
+  .tab-btn {
+    flex: 1;
+    justify-content: center;
+    font-size: 0.9rem;
+  }
+
+  .grid-2-cols {
+    grid-template-columns: 1fr !important;
+  }
+  
+  .modal-content {
+    padding: 1.5rem;
+  }
 }

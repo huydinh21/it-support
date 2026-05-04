@@ -5,7 +5,7 @@ import {
   Sun, Moon, Search, Wrench, FileText, X, 
   CheckCircle2, Clock, AlertCircle, Calendar, 
   User, CreditCard, Shield, ExternalLink, Info,
-  ChevronRight, Edit2, Save, Plus, Trash2
+  ChevronRight, Edit2, Save, Plus, Trash2, QrCode, Wifi, Cpu, Printer, HelpCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -15,9 +15,8 @@ function App() {
   // Quản lý các dữ liệu local, theme, auth và lịch sử sửa chữa
   // =========================================================
 
-  // Theme state: Lưu lại cấu hình theme (sáng/tối) của người dùng
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    return (localStorage.getItem('app-theme') as 'light' | 'dark') || 'dark';
+    return (localStorage.getItem('app-theme') as 'light' | 'dark') || 'light';
   });
 
   // Data state
@@ -50,6 +49,8 @@ function App() {
   const [selectedRepair, setSelectedRepair] = useState<RepairHistory | null>(null);
   const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null);
   const [editingItem, setEditingItem] = useState<{ type: 'repair' | 'policy', data: any, isNew?: boolean } | null>(null);
+  // State ẩn/hiện modal nhập mã QR thiết bị
+  const [showQR, setShowQR] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -250,7 +251,7 @@ function App() {
         {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
       </button>
 
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
           <h1>Hệ thống Quản lý RMG</h1>
           <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>Quản lý Lịch sử sửa chữa & Chính sách nội quy</p>
@@ -270,7 +271,7 @@ function App() {
       </header>
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem', marginBottom: '3rem' }}>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', width: '100%', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
           <div className="tabs">
             <button className={`tab-btn ${activeTab === 'repair' ? 'active' : ''}`} onClick={() => setActiveTab('repair')}>
               <Wrench size={18} /> Sửa chữa
@@ -312,17 +313,40 @@ function App() {
       <AnimatePresence mode="wait">
         <motion.div key={activeTab} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className={activeTab === 'logs' ? '' : 'grid-view'} style={activeTab === 'logs' ? {width: '100%', maxWidth: '600px', margin: '0 auto'} : {}}>
           {activeTab === 'repair' ? (
-            filteredRepairs.map((repair) => (
-              <RepairCard key={repair.id} repair={repair} onClick={() => setSelectedRepair(repair)} onEdit={() => {}} />
-            ))
+            filteredRepairs.length === 0 ? (
+              // Empty State: Khi không có dữ liệu hoặc không tìm thấy kết quả
+              <div className="empty-state">
+                <div className="empty-state-icon">🔧</div>
+                <h3>{searchTerm ? 'Không tìm thấy kết quả' : 'Chưa có lịch sử sửa chữa'}</h3>
+                <p>{searchTerm ? `Không có kết quả nào cho "${searchTerm}"` : 'Bấm "Tạo yêu cầu" để gửi phiếu báo lỗi thiết bị đầu tiên.'}</p>
+              </div>
+            ) : (
+              filteredRepairs.map((repair) => (
+                <RepairCard key={repair.id} repair={repair} onClick={() => setSelectedRepair(repair)} onEdit={() => {}} />
+              ))
+            )
           ) : activeTab === 'policy' ? (
-            filteredPolicies.map((policy) => (
-              <PolicyCard key={policy.id} policy={policy} onClick={() => setSelectedPolicy(policy)} onEdit={() => {}} />
-            ))
+            filteredPolicies.length === 0 ? (
+              // Empty State: Khi không có chính sách nào
+              <div className="empty-state">
+                <div className="empty-state-icon">📄</div>
+                <h3>{searchTerm ? 'Không tìm thấy kết quả' : 'Chưa có chính sách nào'}</h3>
+                <p>{searchTerm ? `Không có kết quả nào cho "${searchTerm}"` : 'Chưa có chính sách nội quy nào được ban hành.'}</p>
+              </div>
+            ) : (
+              filteredPolicies.map((policy) => (
+                <PolicyCard key={policy.id} policy={policy} onClick={() => setSelectedPolicy(policy)} onEdit={() => {}} />
+              ))
+            )
           ) : (
+            // Tab Lịch sử thao tác (Audit Log) — chỉ Admin
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               {logs.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)', background: 'var(--bg-card)', borderRadius: '15px' }}>Chưa có lịch sử thêm/sửa nào được ghi nhận.</div>
+                <div className="empty-state">
+                  <div className="empty-state-icon">📋</div>
+                  <h3>Chưa có lịch sử thao tác</h3>
+                  <p>Mọi thao tác thêm, sửa, xóa sẽ được ghi lại tại đây.</p>
+                </div>
               ) : (
                 logs.map(log => (
                   <div key={log.id} style={{ padding: '1rem 1.5rem', background: 'var(--bg-card)', borderRadius: '12px', borderLeft: log.msg.includes('xóa') ? '4px solid var(--danger)' : log.msg.includes('cập nhật') ? '4px solid var(--accent)' : '4px solid var(--primary)', display: 'flex', flexDirection: 'column', gap: '0.5rem', boxShadow: 'var(--shadow)' }}>
@@ -408,23 +432,36 @@ function App() {
 // Các Component này nhận Props và hiển thị dạng Card UI
 // =========================================================
 
+// Hàm helper: trả về class CSS và nhãn text cho mức SLA
+function getPriorityInfo(priority?: string) {
+  switch(priority) {
+    case 'urgent': return { cls: 'priority-urgent', cardCls: 'card-urgent', label: '🔴 Khẩn cấp' };
+    case 'high':   return { cls: 'priority-high',   cardCls: 'card-high',   label: '🟠 Cao' };
+    case 'medium': return { cls: 'priority-medium', cardCls: 'card-medium', label: '🟡 Trung bình' };
+    case 'low':    return { cls: 'priority-low',    cardCls: 'card-low',    label: '🟢 Thấp' };
+    default:       return { cls: 'priority-low',    cardCls: '',            label: '🟢 Thấp' };
+  }
+}
+
 // Component hiển thị thẻ Lịch sử sửa chữa (Thumbnail Card)
 function RepairCard({ repair, onClick, onEdit }: { repair: RepairHistory, onClick: () => void, onEdit: () => void }) {
+  const pri = getPriorityInfo((repair as any).priority);
   return (
-    <div className="card" onClick={onClick}>
+    <div className={`card ${pri.cardCls}`} onClick={onClick}>
       <div className="card-header">
         <div>
           <div className="card-title">{repair.machineName || 'Chưa đặt tên'}</div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{repair.machineId}</div>
         </div>
-        <div className={`badge badge-${repair.status}`}>{repair.status}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', alignItems: 'flex-end' }}>
+          <div className={`badge ${pri.cls}`} style={{ padding: '0.25rem 0.6rem', borderRadius: '8px', fontSize: '0.7rem', fontWeight: 700 }}>{pri.label}</div>
+          <div className={`badge badge-${repair.status}`}>{repair.status}</div>
+        </div>
       </div>
       <div style={{ marginBottom: '1rem', fontSize: '0.95rem' }}>{repair.problem || 'Chưa nhập lỗi...'}</div>
       <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}><Calendar size={14} /> {repair.repairDate}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <div style={{ color: 'var(--primary)', fontWeight: 700 }}>Xem chi tiết <ChevronRight size={14} /></div>
-        </div>
+        <div style={{ color: 'var(--primary)', fontWeight: 700 }}>Xem chi tiết <ChevronRight size={14} /></div>
       </div>
     </div>
   );
@@ -459,7 +496,7 @@ function RepairDetail({ repair }: { repair: RepairHistory }) {
   return (
     <div>
       <h2 style={{ marginBottom: '1.5rem', borderLeft: '4px solid var(--primary)', paddingLeft: '1rem' }}>{repair.machineName}</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
+      <div className="grid-2-cols" style={{ display: 'grid', gap: '1.5rem', marginBottom: '2rem' }}>
         <DetailItem label="Mã thiết bị" value={repair.machineId} />
         <DetailItem label="Loại máy" value={repair.machineType} />
         <DetailItem label="Ngày sửa" value={repair.repairDate} />
@@ -474,40 +511,66 @@ function RepairDetail({ repair }: { repair: RepairHistory }) {
         <h4 style={{ marginBottom: '0.8rem', color: 'var(--text-muted)' }}>Cách xử lý:</h4>
         <div style={{ padding: '1rem', background: 'var(--bg-main)', borderRadius: '10px', border: '1px solid var(--border)' }}>{repair.solution}</div>
       </div>
-    </div>
-  );
-}
-
-// Khung hiển thị Chi tiết của một quyển Chính sách
-function PolicyDetail({ policy, onAttachmentClick }: { policy: Policy, onAttachmentClick: (e: any, f: string) => void }) {
-  return (
-    <div>
-      <div style={{ color: 'var(--primary)', fontWeight: 800, fontSize: '0.8rem', marginBottom: '0.5rem' }}>LĨNH VỰC: {policy.category.toUpperCase()}</div>
-      <h2 style={{ marginBottom: '1.5rem', lineHeight: '1.4' }}>{policy.title}</h2>
-      <div style={{ display: 'flex', gap: '2rem', marginBottom: '2rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
-        <DetailItem label="Ngày ban hành" value={policy.issuedDate} />
-        <DetailItem label="Trạng thái" value={policy.status} />
-      </div>
-      <div className="policy-content" dangerouslySetInnerHTML={{ __html: policy.content }} />
-    </div>
-  );
-}
-
-// =========================================================
-// 6. COMPONENT NHẬP LIỆU (CÁC FORM ĐIỀN THÔNG TIN)
-// Cho phép Admin lưu trữ hoặc cho Nhân viên tạo Yêu cầu
-// =========================================================
+// ... (PolicyCard and other components)
 
 // Biểu mẫu Nhập liệu Lịch sử (Dùng chung cho Tạo mới & Chỉnh sửa tùy theo Role)
 function RepairEditForm({ data, isNew, role, onSave, onCancel }: { data: RepairHistory, isNew?: boolean, role?: string, onSave: (d: RepairHistory) => void, onCancel: () => void }) {
-  const [f, setF] = useState({ ...data });
+  const [f, setF] = useState({ ...data, priority: (data as any).priority || 'medium' });
+  const [showQRScanner, setShowQRScanner] = useState(false);
+
+  const quickDevices = [
+    { id: 'M001', name: 'Máy ép nhựa số 1', type: 'Máy ép nhựa' },
+    { id: 'M002', name: 'Máy cắt CNC-02', type: 'Máy cắt CNC' },
+    { id: 'M003', name: 'Máy đóng gói tự động', type: 'Máy đóng gói' },
+    { id: 'M004', name: 'Máy phát điện dự phòng', type: 'Máy phát điện' },
+    { id: 'M005', name: 'Cánh tay robot Kuka', type: 'Robot công nghiệp' },
+  ];
+
   return (
     <div>
       <h2 style={{ marginBottom: '2rem' }}>{role === 'staff' ? '📝 Lập phiếu yêu cầu' : isNew ? '✨ Thêm lịch sử mới' : '📝 Sửa lịch sử'}</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+
+      {role === 'staff' && (
+        <div style={{ marginBottom: '1.5rem' }}>
+          <div className="qr-box" onClick={() => setShowQRScanner(!showQRScanner)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem', background: 'var(--bg-main)', borderRadius: '12px', border: '1px dashed var(--primary)' }}>
+            <QrCode size={32} color="var(--primary)" />
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>Quét mã QR thiết bị</span>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Bấm để chọn nhanh thông tin máy — không cần nhập tay</span>
+            </div>
+          </div>
+          <AnimatePresence>
+            {showQRScanner && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} style={{ overflow: 'hidden', marginTop: '0.5rem', background: 'var(--bg-main)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                {quickDevices.map(dev => (
+                  <div key={dev.id} onClick={() => { setF({...f, machineId: dev.id, machineName: dev.name }); setShowQRScanner(false); }}
+                    style={{ padding: '0.8rem 1.2rem', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{dev.name}</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{dev.id} — {dev.type}</div>
+                    </div>
+                    <ChevronRight size={16} color="var(--primary)" />
+                  </div>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      <div className="grid-2-cols" style={{ display: 'grid', gap: '1rem' }}>
         <FormComp label="Tên thiết bị"><input className="form-input" value={f.machineName} onChange={e => setF({...f, machineName: e.target.value})} placeholder="VD: Máy cắt CNC" /></FormComp>
         <FormComp label="Mã thiết bị"><input className="form-input" value={f.machineId} onChange={e => setF({...f, machineId: e.target.value})} /></FormComp>
         <FormComp label="Ngày báo lỗi"><input className="form-input" type="date" value={f.repairDate} onChange={e => setF({...f, repairDate: e.target.value})} /></FormComp>
+        <FormComp label="Mức độ ưu tiên">
+          <select className="form-input" value={(f as any).priority} onChange={e => setF({...f, priority: e.target.value} as any)}>
+            <option value="urgent">🔴 Khẩn cấp</option>
+            <option value="high">🟠 Cao</option>
+            <option value="medium">🟡 Trung bình</option>
+            <option value="low">🟢 Thấp</option>
+          </select>
+        </FormComp>
         <FormComp label="Dự kiến chi phí (nếu có)"><input className="form-input" type="number" value={f.cost} onChange={e => setF({...f, cost: Number(e.target.value)})} /></FormComp>
         <FormComp label="Mô tả tình trạng hỏng hóc" fullW><textarea className="form-input" rows={3} value={f.problem} onChange={e => setF({...f, problem: e.target.value})} /></FormComp>
         {role === 'admin' && <FormComp label="Giải pháp (Chỉ kĩ thuật ghi)" fullW><textarea className="form-input" rows={3} value={f.solution} onChange={e => setF({...f, solution: e.target.value})} /></FormComp>}
@@ -526,7 +589,7 @@ function PolicyEditForm({ data, isNew, role, onSave, onCancel }: { data: Policy,
   return (
     <div>
       <h2 style={{ marginBottom: '2rem' }}>{role === 'staff' ? '📄 Yêu cầu hỗ trợ/thắc mắc chính sách' : isNew ? '📄 Thêm chính sách mới' : '📝 Sửa chính sách'}</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+      <div className="grid-2-cols" style={{ display: 'grid', gap: '1rem' }}>
         <FormComp label="Tiêu đề / Nguyện vọng" fullW><input className="form-input" value={f.title} onChange={e => setF({...f, title: e.target.value})} /></FormComp>
         <FormComp label="Phòng ban"><input className="form-input" value={f.createdBy} onChange={e => setF({...f, createdBy: e.target.value})} /></FormComp>
         <FormComp label="Danh mục">
