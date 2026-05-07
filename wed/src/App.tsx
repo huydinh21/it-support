@@ -8,6 +8,7 @@ import {
   ChevronRight, Edit2, Save, Plus, Trash2, QrCode, Wifi, Cpu, Printer, HelpCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { QRCodeSVG } from 'qrcode.react';
 
 function App() {
   // =========================================================
@@ -511,77 +512,29 @@ function RepairDetail({ repair }: { repair: RepairHistory }) {
         <h4 style={{ marginBottom: '0.8rem', color: 'var(--text-muted)' }}>Cách xử lý:</h4>
         <div style={{ padding: '1rem', background: 'var(--bg-main)', borderRadius: '10px', border: '1px solid var(--border)' }}>{repair.solution}</div>
       </div>
-// ... (PolicyCard and other components)
-
-// Biểu mẫu Nhập liệu Lịch sử (Dùng chung cho Tạo mới & Chỉnh sửa tùy theo Role)
-function RepairEditForm({ data, isNew, role, onSave, onCancel }: { data: RepairHistory, isNew?: boolean, role?: string, onSave: (d: RepairHistory) => void, onCancel: () => void }) {
-  const [f, setF] = useState({ ...data, priority: (data as any).priority || 'medium' });
-  const [showQRScanner, setShowQRScanner] = useState(false);
-
-  const quickDevices = [
-    { id: 'M001', name: 'Máy ép nhựa số 1', type: 'Máy ép nhựa' },
-    { id: 'M002', name: 'Máy cắt CNC-02', type: 'Máy cắt CNC' },
-    { id: 'M003', name: 'Máy đóng gói tự động', type: 'Máy đóng gói' },
-    { id: 'M004', name: 'Máy phát điện dự phòng', type: 'Máy phát điện' },
-    { id: 'M005', name: 'Cánh tay robot Kuka', type: 'Robot công nghiệp' },
-  ];
-
-  return (
-    <div>
-      <h2 style={{ marginBottom: '2rem' }}>{role === 'staff' ? '📝 Lập phiếu yêu cầu' : isNew ? '✨ Thêm lịch sử mới' : '📝 Sửa lịch sử'}</h2>
-
-      {role === 'staff' && (
-        <div style={{ marginBottom: '1.5rem' }}>
-          <div className="qr-box" onClick={() => setShowQRScanner(!showQRScanner)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem', background: 'var(--bg-main)', borderRadius: '12px', border: '1px dashed var(--primary)' }}>
-            <QrCode size={32} color="var(--primary)" />
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>Quét mã QR thiết bị</span>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Bấm để chọn nhanh thông tin máy — không cần nhập tay</span>
-            </div>
-          </div>
-          <AnimatePresence>
-            {showQRScanner && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} style={{ overflow: 'hidden', marginTop: '0.5rem', background: 'var(--bg-main)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-                {quickDevices.map(dev => (
-                  <div key={dev.id} onClick={() => { setF({...f, machineId: dev.id, machineName: dev.name }); setShowQRScanner(false); }}
-                    style={{ padding: '0.8rem 1.2rem', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{dev.name}</div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{dev.id} — {dev.type}</div>
-                    </div>
-                    <ChevronRight size={16} color="var(--primary)" />
-                  </div>
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      )}
-
-      <div className="grid-2-cols" style={{ display: 'grid', gap: '1rem' }}>
-        <FormComp label="Tên thiết bị"><input className="form-input" value={f.machineName} onChange={e => setF({...f, machineName: e.target.value})} placeholder="VD: Máy cắt CNC" /></FormComp>
-        <FormComp label="Mã thiết bị"><input className="form-input" value={f.machineId} onChange={e => setF({...f, machineId: e.target.value})} /></FormComp>
-        <FormComp label="Ngày báo lỗi"><input className="form-input" type="date" value={f.repairDate} onChange={e => setF({...f, repairDate: e.target.value})} /></FormComp>
-        <FormComp label="Mức độ ưu tiên">
-          <select className="form-input" value={(f as any).priority} onChange={e => setF({...f, priority: e.target.value} as any)}>
-            <option value="urgent">🔴 Khẩn cấp</option>
-            <option value="high">🟠 Cao</option>
-            <option value="medium">🟡 Trung bình</option>
-            <option value="low">🟢 Thấp</option>
-          </select>
-        </FormComp>
-        <FormComp label="Dự kiến chi phí (nếu có)"><input className="form-input" type="number" value={f.cost} onChange={e => setF({...f, cost: Number(e.target.value)})} /></FormComp>
-        <FormComp label="Mô tả tình trạng hỏng hóc" fullW><textarea className="form-input" rows={3} value={f.problem} onChange={e => setF({...f, problem: e.target.value})} /></FormComp>
-        {role === 'admin' && <FormComp label="Giải pháp (Chỉ kĩ thuật ghi)" fullW><textarea className="form-input" rows={3} value={f.solution} onChange={e => setF({...f, solution: e.target.value})} /></FormComp>}
-      </div>
-      <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-        <button className="tab-btn" onClick={onCancel}>Hủy bỏ</button>
-        <button className="tab-btn active" onClick={() => onSave(f)}>{role === 'staff' ? 'Gửi yêu cầu đi' : 'Lưu thông tin'}</button>
-      </div>
     </div>
   );
 }
+
+// Khung hiển thị Chi tiết của một quyển Chính sách
+function PolicyDetail({ policy, onAttachmentClick }: { policy: Policy, onAttachmentClick: (e: any, f: string) => void }) {
+  return (
+    <div>
+      <div style={{ color: 'var(--primary)', fontWeight: 800, fontSize: '0.8rem', marginBottom: '0.5rem' }}>LĨNH VỰC: {policy.category.toUpperCase()}</div>
+      <h2 style={{ marginBottom: '1.5rem', lineHeight: '1.4' }}>{policy.title}</h2>
+      <div style={{ display: 'flex', gap: '2rem', marginBottom: '2rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
+        <DetailItem label="Ngày ban hành" value={policy.issuedDate} />
+        <DetailItem label="Trạng thái" value={policy.status} />
+      </div>
+      <div className="policy-content" dangerouslySetInnerHTML={{ __html: policy.content }} />
+    </div>
+  );
+}
+
+// =========================================================
+// 6. COMPONENT NHẬP LIỆU (CÁC FORM ĐIỀN THÔNG TIN)
+// Cho phép Admin lưu trữ hoặc cho Nhân viên tạo Yêu cầu
+// =========================================================
 
 // Biểu mẫu Nhập liệu Chính sách Công ty
 function PolicyEditForm({ data, isNew, role, onSave, onCancel }: { data: Policy, isNew?: boolean, role?: string, onSave: (d: Policy) => void, onCancel: () => void }) {
@@ -589,7 +542,7 @@ function PolicyEditForm({ data, isNew, role, onSave, onCancel }: { data: Policy,
   return (
     <div>
       <h2 style={{ marginBottom: '2rem' }}>{role === 'staff' ? '📄 Yêu cầu hỗ trợ/thắc mắc chính sách' : isNew ? '📄 Thêm chính sách mới' : '📝 Sửa chính sách'}</h2>
-      <div className="grid-2-cols" style={{ display: 'grid', gap: '1rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
         <FormComp label="Tiêu đề / Nguyện vọng" fullW><input className="form-input" value={f.title} onChange={e => setF({...f, title: e.target.value})} /></FormComp>
         <FormComp label="Phòng ban"><input className="form-input" value={f.createdBy} onChange={e => setF({...f, createdBy: e.target.value})} /></FormComp>
         <FormComp label="Danh mục">
@@ -643,5 +596,89 @@ function FormComp({ label, children, fullW }: { label: string, children: React.R
     </div>
   );
 }
+
+// Biểu mẫu Nhập liệu Lịch sử (Dùng chung cho Tạo mới & Chỉnh sửa tùy theo Role)
+function RepairEditForm({ data, isNew, role, onSave, onCancel }: { data: RepairHistory, isNew?: boolean, role?: string, onSave: (d: RepairHistory) => void, onCancel: () => void }) {
+  const [f, setF] = useState({ ...data, priority: (data as any).priority || 'medium' });
+  const [showQRScanner, setShowQRScanner] = useState(false);
+
+  const quickDevices = [
+    { id: 'M001', name: 'Máy ép nhựa số 1', type: 'Máy ép nhựa' },
+    { id: 'M002', name: 'Máy cắt CNC-02', type: 'Máy cắt CNC' },
+    { id: 'M003', name: 'Máy đóng gói tự động', type: 'Máy đóng gói' },
+    { id: 'M004', name: 'Máy phát điện dự phòng', type: 'Máy phát điện' },
+    { id: 'M005', name: 'Cánh tay robot Kuka', type: 'Robot công nghiệp' },
+  ];
+
+  return (
+    <div>
+      <h2 style={{ marginBottom: '2rem' }}>{role === 'staff' ? '📝 Lập phiếu yêu cầu' : isNew ? '✨ Thêm lịch sử mới' : '📝 Sửa lịch sử'}</h2>
+
+      {role === 'staff' && (
+        <div style={{ marginBottom: '1.5rem' }}>
+          <div className="qr-box" onClick={() => setShowQRScanner(!showQRScanner)} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '1rem', padding: '1rem', background: 'var(--bg-main)', borderRadius: '12px', border: '1px dashed var(--primary)' }}>
+            <QrCode size={32} color="var(--primary)" />
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>Quét mã QR thiết bị</span>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Bấm để chọn nhanh thông tin máy — không cần nhập tay</span>
+            </div>
+          </div>
+          <AnimatePresence>
+            {showQRScanner && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} style={{ overflow: 'hidden', marginTop: '0.5rem', background: 'var(--bg-main)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                {quickDevices.map(dev => (
+                  <div key={dev.id} onClick={() => { setF({...f, machineId: dev.id, machineName: dev.name }); setShowQRScanner(false); }}
+                    style={{ padding: '0.8rem 1.2rem', cursor: 'pointer', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    {/* Thông tin thiết bị bên trái */}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600 }}>{dev.name}</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{dev.id} — {dev.type}</div>
+                    </div>
+                    {/* Mã QR nhỏ ở góc phải — hiển thị mã thiết bị */}
+                    <div style={{ padding: '4px', background: 'white', borderRadius: '6px', flexShrink: 0 }}>
+                      <QRCodeSVG
+                        value={`DEVICE:${dev.id}:${dev.name}`}
+                        size={48}
+                        bgColor="#ffffff"
+                        fgColor="#0f172a"
+                        level="M"
+                      />
+                    </div>
+                    <ChevronRight size={16} color="var(--primary)" style={{ flexShrink: 0 }} />
+                  </div>
+                ))}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      <div className="grid-2-cols" style={{ display: 'grid', gap: '1rem' }}>
+        <FormComp label="Tên thiết bị"><input className="form-input" value={f.machineName} onChange={e => setF({...f, machineName: e.target.value})} placeholder="VD: Máy cắt CNC" /></FormComp>
+        <FormComp label="Mã thiết bị"><input className="form-input" value={f.machineId} onChange={e => setF({...f, machineId: e.target.value})} /></FormComp>
+        <FormComp label="Ngày báo lỗi"><input className="form-input" type="date" value={f.repairDate} onChange={e => setF({...f, repairDate: e.target.value})} /></FormComp>
+        <FormComp label="Mức độ ưu tiên">
+          <select className="form-input" value={(f as any).priority} onChange={e => setF({...f, priority: e.target.value} as any)}>
+            <option value="urgent">🔴 Khẩn cấp</option>
+            <option value="high">🟠 Cao</option>
+            <option value="medium">🟡 Trung bình</option>
+            <option value="low">🟢 Thấp</option>
+          </select>
+        </FormComp>
+        <FormComp label="Dự kiến chi phí (nếu có)"><input className="form-input" type="number" value={f.cost} onChange={e => setF({...f, cost: Number(e.target.value)})} /></FormComp>
+        <FormComp label="Mô tả tình trạng hỏng hóc" fullW><textarea className="form-input" rows={3} value={f.problem} onChange={e => setF({...f, problem: e.target.value})} /></FormComp>
+        {role === 'admin' && <FormComp label="Giải pháp (Chỉ kĩ thuật ghi)" fullW><textarea className="form-input" rows={3} value={f.solution} onChange={e => setF({...f, solution: e.target.value})} /></FormComp>}
+      </div>
+      <div style={{ marginTop: '2rem', display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+        <button className="tab-btn" onClick={onCancel}>Hủy bỏ</button>
+        <button className="tab-btn active" onClick={() => onSave(f)}>{role === 'staff' ? 'Gửi yêu cầu đi' : 'Lưu thông tin'}</button>
+      </div>
+    </div>
+  );
+}
+
 
 export default App;
