@@ -39,10 +39,24 @@ body {
 }
 
 .app-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-wrapper {
+  width: 100%;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 0 1.5rem;
 }
+
+@media (max-width: 768px) {
+  .page-wrapper {
+    padding: 0 1rem;
+  }
+}
+
 
 header {
   margin-bottom: 2rem;

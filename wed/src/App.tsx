@@ -1,14 +1,35 @@
 import { useState, useEffect } from 'react';
-import { mockRepairHistory as initialRepairs, type RepairHistory } from './data/mockRepairHistory';
+import { mockRepairHistory as initialRepairs, mockTechnicians, mockAssets, type RepairHistory } from './data/mockRepairHistory';
 import { mockPolicies as initialPolicies, type Policy } from './data/mockPolicies';
+import { mockUsers as initialUsers, type UserAccount } from './data/mockUsers';
 import { 
   Sun, Moon, Search, Wrench, FileText, X, 
   CheckCircle2, Clock, AlertCircle, Calendar, 
   User, CreditCard, Shield, ExternalLink, Info,
-  ChevronRight, Edit2, Save, Plus, Trash2, QrCode, Wifi, Cpu, Printer, HelpCircle
+  ChevronRight, Edit2, Save, Plus, Trash2, QrCode, Wifi, Cpu, Printer, HelpCircle,
+  Filter, BarChart3, Users, Briefcase, Activity
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
+
+// Thành phần biểu đồ cột mini (Custom Bar Chart)
+function ChartBar({ value, max, color, label }: { value: number, max: number, color: string, label: string }) {
+  const height = max > 0 ? (value / max) * 100 : 0;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, gap: '8px', height: '100%' }}>
+      <div style={{ fontSize: '0.8rem', fontWeight: 800, color: color }}>{value}</div>
+      <div style={{ width: '100%', maxWidth: '30px', background: 'var(--bg-main)', borderRadius: '6px', flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <motion.div 
+          initial={{ height: 0 }} 
+          animate={{ height: `${height}%` }} 
+          transition={{ duration: 1, ease: 'easeOut' }}
+          style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', background: color, borderRadius: '4px' }}
+        />
+      </div>
+      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 600, textAlign: 'center', lineHeight: 1.2 }}>{label}</div>
+    </div>
+  );
+}
 
 function App() {
   // =========================================================
@@ -38,20 +59,61 @@ function App() {
 
   // Auth & UI state: Lưu trữ tài khoản và vai trò (Role)
   // Vai trò 'admin' sẽ FULL QUYỀN, 'staff' chỉ được XEM và YÊU CẦU.
-  const [role, setRole] = useState<'admin' | 'staff'>('staff');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [role, setRole] = useState<'admin' | 'staff'>(() => {
+    return (localStorage.getItem('app-role') as any) || 'staff';
+  });
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return localStorage.getItem('app-is-auth') === 'true';
+  });
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
+    const saved = localStorage.getItem('app-user-info');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('app-role', role);
+    localStorage.setItem('app-is-auth', isAuthenticated.toString());
+    localStorage.setItem('app-user-info', JSON.stringify(currentUser));
+  }, [role, isAuthenticated, currentUser]);
+
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
+
 
   // UI state
-  const [activeTab, setActiveTab] = useState<'repair' | 'policy' | 'logs'>('repair');
+  const [activeTab, setActiveTab] = useState<'repair' | 'policy' | 'logs' | 'users'>('repair');
+
+  // Quản lý danh sách tài khoản (Chỉ Admin)
+  const [users, setUsers] = useState<UserAccount[]>(() => {
+    const saved = localStorage.getItem('app-users');
+    if (!saved) return initialUsers;
+    const parsed: UserAccount[] = JSON.parse(saved);
+    // Đảm bảo các tài khoản cũ đều có status là 'approved'
+    return parsed.map(u => ({
+      ...u,
+      status: u.status || 'approved'
+    }));
+  });
+
+
+  useEffect(() => {
+    localStorage.setItem('app-users', JSON.stringify(users));
+  }, [users]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRepair, setSelectedRepair] = useState<RepairHistory | null>(null);
   const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null);
-  const [editingItem, setEditingItem] = useState<{ type: 'repair' | 'policy', data: any, isNew?: boolean } | null>(null);
+  const [editingItem, setEditingItem] = useState<{ type: 'repair' | 'policy' | 'user', data: any, isNew?: boolean } | null>(null);
   // State ẩn/hiện modal nhập mã QR thiết bị
   const [showQR, setShowQR] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
+  const [adminFilters, setAdminFilters] = useState({
+    status: 'all',
+    priority: 'all',
+    category: 'all'
+  });
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -96,8 +158,11 @@ function App() {
         solution: '',
         cost: 0,
         status: 'in-progress',
+        priority: 'medium',
+        deadline: new Date(Date.now() + 7*24*60*60*1000).toISOString().split('T')[0], // Mặc định hạn 7 ngày
         partsReplaced: [],
         notes: ''
+
       };
       setEditingItem({ type: 'repair', data: newRepair, isNew: true });
     } else {
@@ -158,22 +223,45 @@ function App() {
     }
   };
 
-  const filteredRepairs = repairs.filter(item => 
-    item.machineName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.problem.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Lọc dữ liệu theo Search và Bộ lọc Admin nâng cao
+  const getFilteredRepairs = () => {
+    const lowerSearch = searchTerm.toLowerCase();
+    const filtered = repairs.filter(r => {
+      const matchSearch = (r.machineName || '').toLowerCase().includes(lowerSearch) || 
+                         (r.machineId || '').toLowerCase().includes(lowerSearch) ||
+                         (r.problem || '').toLowerCase().includes(lowerSearch);
+      const matchStatus = adminFilters.status === 'all' || r.status === adminFilters.status;
+      const matchPriority = adminFilters.priority === 'all' || ((r as any).priority || 'medium') === adminFilters.priority;
+      
+      return matchSearch && matchStatus && matchPriority;
+    });
 
-  // Lọc dữ liệu theo từ khóa tìm kiếm (Search)
-  const filteredPolicies = policies.filter(item =>
-    item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    item.category.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+    // Sắp xếp: Mới nhất lên đầu
+    return filtered.sort((a, b) => new Date(b.repairDate).getTime() - new Date(a.repairDate).getTime());
+  };
+
+
+  // Tính toán số liệu thống kê (Stats for Dashboard)
+  const stats = {
+    total: repairs.length,
+    completed: repairs.filter(r => r.status === 'completed').length,
+    pending: repairs.filter(r => r.status === 'in-progress' || r.status === 'waiting-parts').length,
+    slaViolated: repairs.filter(r => r.status !== 'completed' && (r as any).deadline && new Date((r as any).deadline) < new Date()).length,
+    byPriority: {
+      urgent: repairs.filter(r => (r as any).priority === 'urgent').length,
+      high: repairs.filter(r => (r as any).priority === 'high').length,
+      medium: repairs.filter(r => (r as any).priority === 'medium' || !(r as any).priority).length,
+      low: repairs.filter(r => (r as any).priority === 'low').length,
+    },
+    byStatus: {
+      inProgress: repairs.filter(r => r.status === 'in-progress').length,
+      waiting: repairs.filter(r => r.status === 'waiting-parts').length,
+      completed: repairs.filter(r => r.status === 'completed').length,
+    }
+  };
 
   // =========================================================
   // 3. XỬ LÝ GIAO DIỆN (RENDER UI) VÀ PHÂN QUYỀN TRUY CẬP
-  // Cấu trúc: 
-  // - Nếu chưa login -> Trả về màn hình Login Mockup
-  // - Lọc quyền (Admin vs Staff) để hiện thị View tương ứng
   // =========================================================
 
   // MÀN HÌNH ĐĂNG NHẬP / MOCKUP XÁC THỰC
@@ -187,11 +275,6 @@ function App() {
           <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
             <Shield size={48} color="var(--primary)" style={{ margin: '0 auto 1rem' }} />
             <h1 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>{authView === 'login' ? 'Đăng nhập RMG' : 'Đăng ký tài khoản'}</h1>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-              {authView === 'login' 
-                ? 'Gợi ý: Tài khoản Admin (admin / admin@123) hoặc NV (nv01 / 123456)' 
-                : 'Đăng ký tài khoản mới.'}
-            </p>
           </div>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -203,29 +286,62 @@ function App() {
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Mật khẩu</label>
               <input type="password" className="form-input" style={{ width: '100%' }} value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
             </div>
+
+            {authView === 'register' && (
+              <>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Họ và Tên</label>
+                  <input type="text" className="form-input" style={{ width: '100%' }} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="VD: Nguyễn Văn A" />
+                </div>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Email công ty</label>
+                  <input type="email" className="form-input" style={{ width: '100%' }} value={email} onChange={e => setEmail(e.target.value)} placeholder="email@rmg.vn" />
+                </div>
+              </>
+            )}
+
             
             <button 
               className="tab-btn active" 
               style={{ width: '100%', marginTop: '1rem', padding: '1rem', justifyContent: 'center', background: 'var(--primary)', borderRadius: '12px' }}
               onClick={() => {
-                // XỬ LÝ PHÂN QUYỀN: Bắt buộc dùng đúng thông tin khởi tạo
                 if(!username || !password) return alert('Vui lòng nhập đủ thông tin!');
                 
                 if (authView === 'login') {
-                  if (username === 'admin' && password === 'admin@123') {
-                    setRole('admin');
+                  const foundUser = users.find(u => u.username === username && u.password === password);
+                  if (foundUser) {
+                    if (foundUser.status === 'pending') {
+                      return alert('Tài khoản của bạn đang chờ Admin phê duyệt. Vui lòng quay lại sau!');
+                    }
+                    setRole(foundUser.role);
+                    setCurrentUser(foundUser);
                     setIsAuthenticated(true);
-                    addLog(`[Hệ thống] Quản trị viên đã đăng nhập.`);
-                  } else if (username === 'nv01' && password === '123456') {
-                    setRole('staff');
-                    setIsAuthenticated(true);
-                    addLog(`[Hệ thống] Nhân viên [nv01] đã đăng nhập.`);
+                    addLog(`[Hệ thống] ${foundUser.fullName} (${foundUser.role}) đã đăng nhập.`);
                   } else {
                     return alert('Tên đăng nhập hoặc mật khẩu không chính xác!');
                   }
                 } else {
-                  return alert('Tính năng Đăng ký đã bị khóa trong bản Demo này!');
+                  // Xử lý Đăng ký
+                  if(!username || !password || !fullName || !email) return alert('Vui lòng nhập đầy đủ các trường!');
+                  const exists = users.find(u => u.username === username);
+                  if(exists) return alert('Tên đăng nhập đã tồn tại!');
+                  
+                  const newUser: UserAccount = {
+                    id: 'U' + Date.now(),
+                    username,
+                    password,
+                    fullName,
+                    email,
+                    role: 'staff',
+                    status: 'pending',
+                    createdAt: new Date().toISOString().split('T')[0]
+                  };
+                  setUsers([...users, newUser]);
+                  addLog(`[Hệ thống] Yêu cầu đăng ký mới từ: ${fullName} (${username})`);
+                  alert('Đăng ký thành công! Vui lòng chờ Admin phê duyệt tài khoản trước khi đăng nhập.');
+                  setAuthView('login');
                 }
+
                 
                 setUsername('');
                 setPassword('');
@@ -252,23 +368,38 @@ function App() {
         {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
       </button>
 
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+      <div className="page-wrapper" style={{ paddingTop: '2rem', paddingBottom: '4rem' }}>
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '2.5rem' }}>
+
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
           <h1>Hệ thống Quản lý RMG</h1>
           <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>Quản lý Lịch sử sửa chữa & Chính sách nội quy</p>
         </motion.div>
         
-        {/* Toggle Role UI */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--bg-card)', padding: '0.5rem 1rem', borderRadius: '20px', border: '1px solid var(--border)' }}>
           <User size={18} color="var(--primary)" />
           <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>Tài khoản:</span>
           <div style={{ padding: '0.3rem 0.5rem', borderRadius: '8px', background: 'var(--bg-main)', color: 'var(--primary)', fontWeight: 700, fontSize: '0.9rem' }}>
             {role === 'admin' ? 'Quản trị viên' : 'Nhân viên'}
           </div>
+          {currentUser && (
+            <div style={{ marginLeft: '0.5rem', fontWeight: 700, fontSize: '1rem', color: 'var(--text-main)' }}>
+               {currentUser.fullName}
+            </div>
+          )}
         </div>
-        <button className="tab-btn" style={{ marginLeft: '1rem', background: 'var(--danger)', color: 'white' }} onClick={() => setIsAuthenticated(false)}>
-           Đăng xuất
-        </button>
+
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {role === 'admin' && (
+            <button className="tab-btn" style={{ background: 'var(--primary)', color: 'white' }} onClick={() => { window.location.reload(); }}>
+              Làm mới trang
+            </button>
+          )}
+
+          <button className="tab-btn" style={{ background: 'var(--danger)', color: 'white' }} onClick={() => setIsAuthenticated(false)}>
+            Đăng xuất
+          </button>
+        </div>
       </header>
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem', marginBottom: '3rem' }}>
@@ -281,9 +412,14 @@ function App() {
               <FileText size={18} /> Chính sách
             </button>
             {role === 'admin' && (
-              <button className={`tab-btn ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')} style={{ borderLeft: '1px solid var(--border)', borderRadius: 0, paddingLeft: '1rem', marginLeft: '0.2rem' }}>
-                <Clock size={18} /> Lịch sử thao tác
-              </button>
+              <>
+                <button className={`tab-btn ${activeTab === 'users' ? 'active' : ''}`} onClick={() => setActiveTab('users')}>
+                  <Users size={18} /> Tài khoản
+                </button>
+                <button className={`tab-btn ${activeTab === 'logs' ? 'active' : ''}`} onClick={() => setActiveTab('logs')} style={{ borderLeft: '1px solid var(--border)', borderRadius: 0, paddingLeft: '1rem', marginLeft: '0.2rem' }}>
+                  <Clock size={18} /> Lịch sử thao tác
+                </button>
+              </>
             )}
           </div>
             <button 
@@ -295,69 +431,203 @@ function App() {
             </button>
         </div>
 
-        <div style={{ position: 'relative', width: '100%', maxWidth: '600px' }}>
-          <Search size={20} style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input 
-            type="text" 
-            placeholder={`Tìm kiếm trong ${activeTab === 'repair' ? 'tên máy, lỗi sửa chữa...' : 'tiêu đề, danh mục chính sách...'}`}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{
-              width: '100%', padding: '0.8rem 1rem 0.8rem 3rem', borderRadius: '15px',
-              border: '1px solid var(--border)', backgroundColor: 'var(--bg-card)',
-              color: 'var(--text-main)', fontSize: '1rem', outline: 'none', transition: 'all 0.2s', boxShadow: 'var(--shadow)'
-            }}
-          />
-        </div>
+        {activeTab === 'repair' && (
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: role === 'admin' ? '1rem' : '0' }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
+              <Search style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} size={18} />
+              <input className="form-input" style={{ width: '100%', paddingLeft: '3rem' }} placeholder="Tìm kiếm theo tên máy, mã số hoặc lỗi..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+            </div>
+            
+            {role === 'admin' && (
+              <>
+                <button className={`tab-btn ${showDashboard ? 'active' : ''}`} onClick={() => setShowDashboard(!showDashboard)}>
+                  <BarChart3 size={18} /> {showDashboard ? 'Ẩn Thống kê' : 'Dashboard'}
+                </button>
+                <select className="form-input" style={{ width: 'auto' }} value={adminFilters.status} onChange={e => setAdminFilters({...adminFilters, status: e.target.value})}>
+                  <option value="all">Tất cả Trạng thái</option>
+                  <option value="in-progress">Đang xử lý</option>
+                  <option value="waiting-parts">Chờ linh kiện</option>
+                  <option value="completed">Hoàn thành</option>
+                </select>
+                <select className="form-input" style={{ width: 'auto' }} value={adminFilters.priority} onChange={e => setAdminFilters({...adminFilters, priority: e.target.value})}>
+                  <option value="all">Mọi Ưu tiên</option>
+                  <option value="urgent">Khẩn cấp</option>
+                  <option value="high">Cao</option>
+                  <option value="medium">Trung bình</option>
+                  <option value="low">Thấp</option>
+                </select>
+              </>
+            )}
+          </div>
+        )}
+
+
+        {role === 'admin' && showDashboard && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} style={{ overflow: 'hidden', width: '100%' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginTop: '1.5rem', marginBottom: '2rem' }}>
+              {/* Cột 1: Chỉ số tổng quát */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="stat-item" style={{ background: 'var(--bg-card)', padding: '1.5rem', borderRadius: '15px', border: '1px solid var(--border)' }}>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Tổng Ticket</div>
+                  <div style={{ fontSize: '2rem', fontWeight: 800 }}>{stats.total}</div>
+                </div>
+                <div className="stat-item" style={{ background: 'var(--bg-card)', padding: '1.5rem', borderRadius: '15px', border: '1px solid var(--border)' }}>
+                  <div style={{ color: '#ef4444', fontSize: '0.85rem' }}>Quá hạn SLA</div>
+                  <div style={{ fontSize: '2rem', fontWeight: 800, color: '#ef4444' }}>{stats.slaViolated}</div>
+                </div>
+                <div className="stat-item" style={{ gridColumn: 'span 2', background: 'var(--bg-card)', padding: '1.5rem', borderRadius: '15px', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <span style={{ color: '#10b981', fontSize: '0.85rem', fontWeight: 600 }}>Tỷ lệ hoàn thành</span>
+                    <span style={{ fontWeight: 800, color: '#10b981' }}>{stats.total > 0 ? Math.round((stats.completed/stats.total)*100) : 0}%</span>
+                  </div>
+                  <div style={{ height: '8px', background: '#e5e7eb', borderRadius: '4px' }}>
+                    <div style={{ width: `${stats.total > 0 ? (stats.completed/stats.total)*100 : 0}%`, height: '100%', background: '#10b981', borderRadius: '4px', transition: 'width 1s ease-in-out' }}></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cột 2: Biểu đồ cột Ưu tiên */}
+              <div style={{ background: 'var(--bg-card)', padding: '1.5rem', borderRadius: '15px', border: '1px solid var(--border)' }}>
+                <div style={{ fontWeight: 700, marginBottom: '1.5rem', fontSize: '0.9rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Phân tích theo Ưu tiên</div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '120px', gap: '10px', paddingBottom: '20px', borderBottom: '1px solid var(--border)' }}>
+                  <ChartBar value={stats.byPriority.urgent} max={stats.total} color="#ef4444" label="Khẩn" />
+                  <ChartBar value={stats.byPriority.high} max={stats.total} color="#f97316" label="Cao" />
+                  <ChartBar value={stats.byPriority.medium} max={stats.total} color="#eab308" label="Vừa" />
+                  <ChartBar value={stats.byPriority.low} max={stats.total} color="#22c55e" label="Thấp" />
+                </div>
+              </div>
+
+              {/* Cột 3: Biểu đồ cột Trạng thái */}
+              <div style={{ background: 'var(--bg-card)', padding: '1.5rem', borderRadius: '15px', border: '1px solid var(--border)' }}>
+                <div style={{ fontWeight: 700, marginBottom: '1.5rem', fontSize: '0.9rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Phân tích theo Trạng thái</div>
+                <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-around', height: '120px', gap: '20px', paddingBottom: '20px', borderBottom: '1px solid var(--border)' }}>
+                  <ChartBar value={stats.byStatus.inProgress} max={stats.total} color="#3b82f6" label="Xử lý" />
+                  <ChartBar value={stats.byStatus.waiting} max={stats.total} color="#f59e0b" label="Chờ linh kiện" />
+                  <ChartBar value={stats.byStatus.completed} max={stats.total} color="#10b981" label="Xong" />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
       </div>
 
       <AnimatePresence mode="wait">
         <motion.div key={activeTab} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className={activeTab === 'logs' ? '' : 'grid-view'} style={activeTab === 'logs' ? {width: '100%', maxWidth: '600px', margin: '0 auto'} : {}}>
           {activeTab === 'repair' ? (
-            filteredRepairs.length === 0 ? (
-              // Empty State: Khi không có dữ liệu hoặc không tìm thấy kết quả
+            getFilteredRepairs().length === 0 ? (
               <div className="empty-state">
                 <div className="empty-state-icon">🔧</div>
-                <h3>{searchTerm ? 'Không tìm thấy kết quả' : 'Chưa có lịch sử sửa chữa'}</h3>
-                <p>{searchTerm ? `Không có kết quả nào cho "${searchTerm}"` : 'Bấm "Tạo yêu cầu" để gửi phiếu báo lỗi thiết bị đầu tiên.'}</p>
+                <h3>Không tìm thấy kết quả</h3>
               </div>
             ) : (
-              filteredRepairs.map((repair) => (
-                <RepairCard key={repair.id} repair={repair} onClick={() => setSelectedRepair(repair)} onEdit={() => {}} />
+              getFilteredRepairs().map((repair) => (
+                <RepairCard key={repair.id} repair={repair} role={role} onClick={() => setSelectedRepair(repair)} onEdit={() => setEditingItem({ type: 'repair', data: repair })} />
               ))
             )
           ) : activeTab === 'policy' ? (
-            filteredPolicies.length === 0 ? (
-              // Empty State: Khi không có chính sách nào
-              <div className="empty-state">
-                <div className="empty-state-icon">📄</div>
-                <h3>{searchTerm ? 'Không tìm thấy kết quả' : 'Chưa có chính sách nào'}</h3>
-                <p>{searchTerm ? `Không có kết quả nào cho "${searchTerm}"` : 'Chưa có chính sách nội quy nào được ban hành.'}</p>
-              </div>
-            ) : (
-              filteredPolicies.map((policy) => (
-                <PolicyCard key={policy.id} policy={policy} onClick={() => setSelectedPolicy(policy)} onEdit={() => {}} />
-              ))
-            )
-          ) : (
-            // Tab Lịch sử thao tác (Audit Log) — chỉ Admin
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {logs.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-state-icon">📋</div>
-                  <h3>Chưa có lịch sử thao tác</h3>
-                  <p>Mọi thao tác thêm, sửa, xóa sẽ được ghi lại tại đây.</p>
+            policies.filter(item => item.title.toLowerCase().includes(searchTerm.toLowerCase())).map((policy) => (
+                <PolicyCard 
+                  key={policy.id} 
+                  policy={policy} 
+                  role={role}
+                  onClick={() => setSelectedPolicy(policy)} 
+                  onEdit={() => setEditingItem({ type: 'policy', data: policy })} 
+                />
+            ))
+
+          ) : activeTab === 'users' ? (
+            <div style={{ width: '100%', maxWidth: '1000px', margin: '0 auto' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                <div>
+                   <h2 style={{ marginBottom: '0.2rem' }}>Quản lý Tài khoản Hệ thống</h2>
+                   <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>Phân quyền và quản lý truy cập cho nhân viên IT & Staff</p>
                 </div>
-              ) : (
-                logs.map(log => (
-                  <div key={log.id} style={{ padding: '1rem 1.5rem', background: 'var(--bg-card)', borderRadius: '12px', borderLeft: log.msg.includes('xóa') ? '4px solid var(--danger)' : log.msg.includes('cập nhật') ? '4px solid var(--accent)' : '4px solid var(--primary)', display: 'flex', flexDirection: 'column', gap: '0.5rem', boxShadow: 'var(--shadow)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                      <Clock size={14} /> {log.time}
-                    </div>
+                <button className="tab-btn active" onClick={() => setEditingItem({ 
+                  type: 'user', 
+                  isNew: true, 
+                  data: { id: 'U'+Date.now(), username: '', password: '', fullName: '', email: '', role: 'staff', status: 'approved', createdAt: new Date().toISOString().split('T')[0] } 
+                })}>
+                  <Plus size={18} /> Thêm tài khoản mới
+                </button>
+              </div>
+
+              <div style={{ background: 'var(--bg-card)', borderRadius: '15px', border: '1px solid var(--border)', overflow: 'hidden', boxShadow: 'var(--shadow)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg-main)', borderBottom: '1px solid var(--border)' }}>
+                      <th style={{ padding: '1.2rem' }}>Họ và Tên</th>
+                      <th style={{ padding: '1.2rem' }}>Tên đăng nhập</th>
+                      <th style={{ padding: '1.2rem' }}>Email / Vai trò</th>
+                      <th style={{ padding: '1.2rem' }}>Trạng thái</th>
+                      <th style={{ padding: '1.2rem', textAlign: 'right' }}>Thao tác</th>
+
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map(user => (
+                      <tr 
+                        key={user.id} 
+                        style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer', transition: 'background 0.2s' }}
+                        onClick={() => setEditingItem({ type: 'user', data: user })}
+                        onMouseOver={(e) => e.currentTarget.style.background = 'var(--bg-main)'}
+                        onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+                      >
+
+                        <td style={{ padding: '1.2rem' }}>
+                          <div style={{ fontWeight: 600 }}>{user.fullName}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>ID: {user.id}</div>
+                        </td>
+                        <td style={{ padding: '1.2rem' }}>
+                          <div style={{ fontWeight: 600 }}>{user.email}</div>
+                          <span style={{ 
+                            padding: '0.2rem 0.6rem', 
+                            borderRadius: '20px', 
+                            fontSize: '0.7rem', 
+                            fontWeight: 700,
+                            background: user.role === 'admin' ? '#fee2e2' : '#dcfce7',
+                            color: user.role === 'admin' ? '#991b1b' : '#166534'
+                          }}>
+                            {user.role.toUpperCase()}
+                          </span>
+                        </td>
+                        <td style={{ padding: '1.2rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: user.status === 'approved' ? '#10b981' : '#f59e0b', fontWeight: 600, fontSize: '0.9rem' }}>
+                            {user.status === 'approved' ? <CheckCircle2 size={16} /> : <Clock size={16} />}
+                            {user.status === 'approved' ? 'Đã duyệt' : 'Chờ duyệt'}
+                          </div>
+                        </td>
+                        <td style={{ padding: '1.2rem', textAlign: 'right' }}>
+                          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                            <button className="tab-btn" style={{ padding: '0.4rem' }} onClick={() => setEditingItem({ type: 'user', data: user })}>
+                              <Edit2 size={14} /> Xem & Sửa
+                            </button>
+                            <button className="tab-btn" style={{ padding: '0.4rem', color: 'var(--danger)' }} onClick={() => {
+                              if(user.username === 'admin') return alert('Không thể xóa tài khoản Admin gốc!');
+                              if(confirm(`Xóa tài khoản ${user.username}?`)) {
+                                setUsers(users.filter(u => u.id !== user.id));
+                                addLog(`[Admin] Đã xóa tài khoản: ${user.username}`);
+                              }
+                            }}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {logs.map(log => (
+                  <div key={log.id} style={{ padding: '1rem 1.5rem', background: 'var(--bg-card)', borderRadius: '12px', borderLeft: log.msg.includes('xóa') ? '4px solid var(--danger)' : '4px solid var(--primary)', display: 'flex', flexDirection: 'column', gap: '0.5rem', boxShadow: 'var(--shadow)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}><Clock size={14} /> {log.time}</div>
                     <div style={{ fontSize: '1rem', fontWeight: 600 }}>{log.msg}</div>
                   </div>
-                ))
-              )}
+                ))}
             </div>
           )}
         </motion.div>
@@ -367,44 +637,16 @@ function App() {
       <AnimatePresence>
         {selectedRepair && (
           <DetailModal onClose={() => setSelectedRepair(null)}>
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-              {role === 'admin' ? (
-                <>
-                  <button className="tab-btn active" style={{ flex: 1 }} onClick={() => { setEditingItem({ type: 'repair', data: selectedRepair }); setSelectedRepair(null); }}>
-                    <Edit2 size={16} /> Chỉnh sửa
-                  </button>
-                  <button className="tab-btn" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', border: '1px solid var(--danger)' }} onClick={() => handleDeleteRepair(selectedRepair.id)}>
-                    <Trash2 size={16} /> Xóa
-                  </button>
-                </>
-              ) : (
-                <button className="tab-btn active" style={{ flex: 1, background: 'var(--primary)' }} onClick={() => {
-                  const req = window.prompt('Nhập yêu cầu sửa chữa bổ sung cho lỗi này:');
-                  if(req) alert('Yêu cầu đã được gửi cho kĩ thuật!');
-                }}>
-                  <AlertCircle size={16} /> Báo cáo / Yêu cầu
-                </button>
-              )}
-            </div>
             <RepairDetail repair={selectedRepair} />
           </DetailModal>
         )}
         {selectedPolicy && (
           <DetailModal onClose={() => setSelectedPolicy(null)}>
-            {role === 'admin' && (
-              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem' }}>
-                <button className="tab-btn active" style={{ flex: 1 }} onClick={() => { setEditingItem({ type: 'policy', data: selectedPolicy }); setSelectedPolicy(null); }}>
-                  <Edit2 size={16} /> Chỉnh sửa
-                </button>
-                <button className="tab-btn" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', border: '1px solid var(--danger)' }} onClick={() => handleDeletePolicy(selectedPolicy.id)}>
-                  <Trash2 size={16} /> Xóa
-                </button>
-              </div>
-            )}
-            <PolicyDetail policy={selectedPolicy} onAttachmentClick={(e, f) => alert(`Dữ liệu mẫu: ${f}`)} />
+            <PolicyDetail policy={selectedPolicy} onAttachmentClick={() => {}} />
           </DetailModal>
         )}
       </AnimatePresence>
+
 
       {/* Edit/Add Modal */}
       <AnimatePresence>
@@ -414,81 +656,144 @@ function App() {
               <RepairEditForm data={editingItem.data} isNew={editingItem.isNew} role={role} onSave={(item) => {
                 handleSaveRepair(item);
                 if (role === 'staff') alert('Phiếu yêu cầu cửa bạn đã được gửi cho Quản lý!');
+                setEditingItem(null);
+              }} onCancel={() => setEditingItem(null)} />
+            ) : editingItem.type === 'user' ? (
+              <UserEditForm data={editingItem.data} isNew={editingItem.isNew} onSave={(u) => {
+                if (editingItem.isNew) {
+                  setUsers([...users, u]);
+                  addLog(`[Admin] Đã tạo tài khoản mới: ${u.fullName} (${u.username})`);
+                } else {
+                  setUsers(users.map(old => old.id === u.id ? u : old));
+                  addLog(`[Admin] Đã cập nhật tài khoản: ${u.username}`);
+                }
+                setEditingItem(null);
               }} onCancel={() => setEditingItem(null)} />
             ) : (
               <PolicyEditForm data={editingItem.data} isNew={editingItem.isNew} role={role} onSave={(item) => {
                 handleSavePolicy(item);
-                if (role === 'staff') alert('Phiếu yêu cầu cửa bạn đã được gửi cho Quản lý!');
+                setEditingItem(null);
               }} onCancel={() => setEditingItem(null)} />
             )}
           </DetailModal>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
+
 }
 
-// =========================================================
-// 4. DANH SÁCH COMPONENT PHỤ TRỢ (Thẻ hiển thị)
-// Các Component này nhận Props và hiển thị dạng Card UI
-// =========================================================
+// Component hiển thị thẻ Lịch sử sửa chữa (Card)
+function RepairCard({ repair, onClick, onEdit, role }: { repair: RepairHistory, onClick: () => void, onEdit: () => void, role: string }) {
+  const statusInfo = {
+    'completed': { icon: <CheckCircle2 size={16} />, color: '#10b981', label: 'Hoàn thành' },
+    'in-progress': { icon: <Clock size={16} />, color: '#3b82f6', label: 'Đang xử lý' },
+    'waiting-parts': { icon: <AlertCircle size={16} />, color: '#f59e0b', label: 'Chờ linh kiện' },
+    'cancelled': { icon: <X size={16} />, color: '#ef4444', label: 'Đã hủy' }
+  }[repair.status] || { icon: <Activity size={16} />, color: '#3b82f6', label: 'Đang xử lý' };
 
-// Hàm helper: trả về class CSS và nhãn text cho mức SLA
-function getPriorityInfo(priority?: string) {
-  switch(priority) {
-    case 'urgent': return { cls: 'priority-urgent', cardCls: 'card-urgent', label: '🔴 Khẩn cấp' };
-    case 'high':   return { cls: 'priority-high',   cardCls: 'card-high',   label: '🟠 Cao' };
-    case 'medium': return { cls: 'priority-medium', cardCls: 'card-medium', label: '🟡 Trung bình' };
-    case 'low':    return { cls: 'priority-low',    cardCls: 'card-low',    label: '🟢 Thấp' };
-    default:       return { cls: 'priority-low',    cardCls: '',            label: '🟢 Thấp' };
-  }
-}
+  const priorityConfigs: Record<string, { color: string, label: string }> = {
+    'urgent': { color: '#ef4444', label: 'Khẩn cấp' },
+    'high': { color: '#f97316', label: 'Cao' },
+    'medium': { color: '#eab308', label: 'Trung bình' },
+    'low': { color: '#22c55e', label: 'Thấp' }
+  };
+  const pInfo = priorityConfigs[repair.priority || 'medium'] || priorityConfigs['medium'];
 
-// Component hiển thị thẻ Lịch sử sửa chữa (Thumbnail Card)
-function RepairCard({ repair, onClick, onEdit }: { repair: RepairHistory, onClick: () => void, onEdit: () => void }) {
-  const pri = getPriorityInfo((repair as any).priority);
+
+  const isSlaViolated = repair.status !== 'completed' && (repair as any).deadline && new Date((repair as any).deadline) < new Date();
+
   return (
-    <div className={`card ${pri.cardCls}`} onClick={onClick}>
-      <div className="card-header">
+    <motion.div className="card" whileHover={{ y: -5 }} onClick={onClick} style={{ borderLeft: `5px solid ${pInfo.color}`, cursor: 'pointer', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: '220px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
         <div>
-          <div className="card-title">{repair.machineName || 'Chưa đặt tên'}</div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{repair.machineId}</div>
+          <h3 style={{ marginBottom: '0.3rem', fontSize: '1.1rem' }}>{repair.machineName || 'Chưa đặt tên'}</h3>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{repair.machineId}</span>
+            <span style={{ fontSize: '0.7rem', padding: '2px 8px', borderRadius: '4px', background: pInfo.color + '20', color: pInfo.color, fontWeight: 700 }}>{pInfo.label.toUpperCase()}</span>
+          </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', alignItems: 'flex-end' }}>
-          <div className={`badge ${pri.cls}`} style={{ padding: '0.25rem 0.6rem', borderRadius: '8px', fontSize: '0.7rem', fontWeight: 700 }}>{pri.label}</div>
-          <div className={`badge badge-${repair.status}`}>{repair.status}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: statusInfo.color, fontSize: '0.85rem', fontWeight: 600 }}>
+          {statusInfo.icon} {statusInfo.label}
         </div>
       </div>
-      <div style={{ marginBottom: '1rem', fontSize: '0.95rem' }}>{repair.problem || 'Chưa nhập lỗi...'}</div>
-      <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}><Calendar size={14} /> {repair.repairDate}</div>
-        <div style={{ color: 'var(--primary)', fontWeight: 700 }}>Xem chi tiết <ChevronRight size={14} /></div>
+      
+      <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '1rem', flex: 1 }}>
+        <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>Lỗi: </span>
+        {repair.problem && repair.problem.length > 80 ? repair.problem.substring(0, 80) + '...' : repair.problem || 'Chưa mô tả lỗi'}
+      </p>
+
+      {repair.assetId && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.8rem' }}>
+          <Briefcase size={14} /> <span>Tài sản: {repair.assetId}</span>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <Calendar size={14} /> <span>{repair.repairDate}</span>
+        </div>
+        <div style={{ fontWeight: 700, color: 'var(--accent)' }}>{repair.cost.toLocaleString()} đ</div>
       </div>
-    </div>
+
+      <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: 'var(--primary)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 800 }}>
+            {repair.repairedBy ? repair.repairedBy.split(' ').pop()?.charAt(0) : '?'}
+          </div>
+          <span style={{ fontSize: '0.8rem', fontWeight: 500 }}>{repair.repairedBy || 'Chưa phân công'}</span>
+        </div>
+        
+        {isSlaViolated && (
+          <div style={{ color: '#ef4444', fontSize: '0.75rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <AlertCircle size={14} /> QUÁ HẠN SLA
+          </div>
+        )}
+      </div>
+
+      {role === 'admin' && (
+        <button className="edit-btn" style={{ position: 'absolute', top: '-10px', right: '-10px', width: '32px', height: '32px', borderRadius: '50%', background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 10 }} 
+          onClick={(e) => { e.stopPropagation(); onEdit(); }}>
+          <Edit2 size={14} />
+        </button>
+      )}
+    </motion.div>
   );
 }
+
 
 // Component hiển thị thẻ Chính sách nội quy (Thumbnail Policy)
-function PolicyCard({ policy, onClick, onEdit }: { policy: Policy, onClick: () => void, onEdit: () => void }) {
+function PolicyCard({ policy, onClick, onEdit, role }: { policy: Policy, onClick: () => void, onEdit: () => void, role: string }) {
   return (
-    <div className="card" onClick={onClick}>
+    <motion.div className="card" whileHover={{ y: -5 }} onClick={onClick} style={{ cursor: 'pointer', position: 'relative', display: 'flex', flexDirection: 'column' }}>
       <div className="card-header">
         <div style={{ fontSize: '0.7rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--primary)' }}>{policy.category}</div>
-        <div className={`badge badge-${policy.status}`}>{policy.status}</div>
+        <div className={`badge badge-${policy.status}`}>{policy.status === 'active' ? 'ĐANG ÁP DỤNG' : 'BẢN NHÁP'}</div>
       </div>
-      <div className="card-title" style={{ marginBottom: '1rem' }}>{policy.title || 'Chính sách không tiêu đề'}</div>
+      <div className="card-title" style={{ marginBottom: '1rem', flex: 1 }}>{policy.title || 'Chính sách không tiêu đề'}</div>
       <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
         <span>Tạo bởi: {policy.createdBy}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <div style={{ color: 'var(--primary)', fontWeight: 700 }}>Xem chi tiết <ChevronRight size={14} /></div>
         </div>
       </div>
-    </div>
+
+      {role === 'admin' && (
+        <button className="edit-btn" style={{ position: 'absolute', top: '-10px', right: '-10px', width: '32px', height: '32px', borderRadius: '50%', background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', zIndex: 10 }} 
+          onClick={(e) => { e.stopPropagation(); onEdit(); }}>
+          <Edit2 size={14} />
+        </button>
+      )}
+    </motion.div>
   );
 }
 
+
 // =========================================================
 // 5. COMPONENT XEM CHI TIẾT (POPUP MODAL)
+// =========================================================
+
 // Đây là các view chi tiết (Chỉ xem) (Read-only view)
 // =========================================================
 
@@ -603,11 +908,11 @@ function RepairEditForm({ data, isNew, role, onSave, onCancel }: { data: RepairH
   const [showQRScanner, setShowQRScanner] = useState(false);
 
   const quickDevices = [
-    { id: 'M001', name: 'Máy ép nhựa số 1', type: 'Máy ép nhựa' },
-    { id: 'M002', name: 'Máy cắt CNC-02', type: 'Máy cắt CNC' },
-    { id: 'M003', name: 'Máy đóng gói tự động', type: 'Máy đóng gói' },
-    { id: 'M004', name: 'Máy phát điện dự phòng', type: 'Máy phát điện' },
-    { id: 'M005', name: 'Cánh tay robot Kuka', type: 'Robot công nghiệp' },
+    { id: 'IT-LAP-001', name: 'Dell Latitude 5420', type: 'Laptop' },
+    { id: 'IT-DES-002', name: 'PC Desktop Core i7', type: 'Workstation' },
+    { id: 'IT-PRI-003', name: 'HP LaserJet Pro M404n', type: 'Printer' },
+    { id: 'IT-NET-004', name: 'Cisco Router 2911', type: 'Network' },
+    { id: 'IT-LAP-005', name: 'Macbook Pro M1', type: 'Laptop' },
   ];
 
   return (
@@ -632,20 +937,12 @@ function RepairEditForm({ data, isNew, role, onSave, onCancel }: { data: RepairH
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card)')}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                   >
-                    {/* Thông tin thiết bị bên trái */}
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600 }}>{dev.name}</div>
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{dev.id} — {dev.type}</div>
                     </div>
-                    {/* Mã QR nhỏ ở góc phải — hiển thị mã thiết bị */}
                     <div style={{ padding: '4px', background: 'white', borderRadius: '6px', flexShrink: 0 }}>
-                      <QRCodeSVG
-                        value={`DEVICE:${dev.id}:${dev.name}`}
-                        size={48}
-                        bgColor="#ffffff"
-                        fgColor="#0f172a"
-                        level="M"
-                      />
+                      <QRCodeSVG value={`DEVICE:${dev.id}:${dev.name}`} size={48} bgColor="#ffffff" fgColor="#0f172a" level="M" />
                     </div>
                     <ChevronRight size={16} color="var(--primary)" style={{ flexShrink: 0 }} />
                   </div>
@@ -659,16 +956,50 @@ function RepairEditForm({ data, isNew, role, onSave, onCancel }: { data: RepairH
       <div className="grid-2-cols" style={{ display: 'grid', gap: '1rem' }}>
         <FormComp label="Tên thiết bị"><input className="form-input" value={f.machineName} onChange={e => setF({...f, machineName: e.target.value})} placeholder="VD: Máy cắt CNC" /></FormComp>
         <FormComp label="Mã thiết bị"><input className="form-input" value={f.machineId} onChange={e => setF({...f, machineId: e.target.value})} /></FormComp>
+        
+        {role === 'admin' && (
+          <>
+            <FormComp label="Gắn tài sản IT">
+              <select className="form-input" value={f.assetId || ''} onChange={e => setF({...f, assetId: e.target.value})}>
+                <option value="">-- Chọn tài sản liên kết --</option>
+                {mockAssets.map(a => <option key={a.id} value={a.id}>{a.id} - {a.name}</option>)}
+              </select>
+            </FormComp>
+            
+            <FormComp label="Phân công Kỹ thuật">
+              <select className="form-input" value={f.repairedBy} onChange={e => setF({...f, repairedBy: e.target.value})}>
+                <option value="">-- Chưa phân công --</option>
+                {mockTechnicians.map(t => <option key={t.id} value={t.name}>{t.name} ({t.role})</option>)}
+              </select>
+            </FormComp>
+          </>
+        )}
+
         <FormComp label="Ngày báo lỗi"><input className="form-input" type="date" value={f.repairDate} onChange={e => setF({...f, repairDate: e.target.value})} /></FormComp>
-        <FormComp label="Mức độ ưu tiên">
-          <select className="form-input" value={(f as any).priority} onChange={e => setF({...f, priority: e.target.value} as any)}>
-            <option value="urgent">🔴 Khẩn cấp</option>
-            <option value="high">🟠 Cao</option>
-            <option value="medium">🟡 Trung bình</option>
-            <option value="low">🟢 Thấp</option>
-          </select>
-        </FormComp>
-        <FormComp label="Dự kiến chi phí (nếu có)"><input className="form-input" type="number" value={f.cost} onChange={e => setF({...f, cost: Number(e.target.value)})} /></FormComp>
+        
+        {role === 'admin' && (
+          <>
+            <FormComp label="Hạn xử lý (SLA)"><input className="form-input" type="date" value={f.deadline} onChange={e => setF({...f, deadline: e.target.value})} /></FormComp>
+            <FormComp label="Trạng thái">
+              <select className="form-input" value={f.status} onChange={e => setF({...f, status: e.target.value as any})}>
+                <option value="in-progress">Đang xử lý</option>
+                <option value="waiting-parts">Chờ linh kiện</option>
+                <option value="completed">Hoàn thành</option>
+                <option value="cancelled">Đã hủy</option>
+              </select>
+            </FormComp>
+            <FormComp label="Mức độ ưu tiên">
+              <select className="form-input" value={f.priority} onChange={e => setF({...f, priority: e.target.value as any})}>
+                <option value="low">Thấp</option>
+                <option value="medium">Trung bình</option>
+                <option value="high">Cao</option>
+                <option value="urgent">Khẩn cấp</option>
+              </select>
+            </FormComp>
+            <FormComp label="Dự kiến chi phí (nếu có)"><input className="form-input" type="number" value={f.cost} onChange={e => setF({...f, cost: Number(e.target.value)})} /></FormComp>
+          </>
+        )}
+
         <FormComp label="Mô tả tình trạng hỏng hóc" fullW><textarea className="form-input" rows={3} value={f.problem} onChange={e => setF({...f, problem: e.target.value})} /></FormComp>
         {role === 'admin' && <FormComp label="Giải pháp (Chỉ kĩ thuật ghi)" fullW><textarea className="form-input" rows={3} value={f.solution} onChange={e => setF({...f, solution: e.target.value})} /></FormComp>}
       </div>
@@ -680,5 +1011,61 @@ function RepairEditForm({ data, isNew, role, onSave, onCancel }: { data: RepairH
   );
 }
 
+
+
+// Biểu mẫu Quản lý Tài khoản (Chỉ Admin)
+function UserEditForm({ data, isNew, onSave, onCancel }: { data: UserAccount, isNew?: boolean, onSave: (u: UserAccount) => void, onCancel: () => void }) {
+  const [f, setF] = useState({ ...data });
+
+  return (
+    <div style={{ padding: '1rem' }}>
+      <h2 style={{ marginBottom: '2rem' }}>{isNew ? '✨ Tạo tài khoản mới' : '📝 Chỉnh sửa tài khoản'}</h2>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+        <FormComp label="Họ và Tên">
+          <input className="form-input" value={f.fullName} onChange={e => setF({...f, fullName: e.target.value})} placeholder="VD: Nguyễn Văn A" />
+        </FormComp>
+        <FormComp label="Tên đăng nhập">
+          <input className="form-input" value={f.username} onChange={e => setF({...f, username: e.target.value})} placeholder="VD: nv02" disabled={!isNew} />
+        </FormComp>
+        <FormComp label="Mật khẩu">
+          <input className="form-input" type="text" value={f.password} onChange={e => setF({...f, password: e.target.value})} placeholder="Nhập mật khẩu" />
+        </FormComp>
+        <FormComp label="Email">
+          <input className="form-input" value={f.email} onChange={e => setF({...f, email: e.target.value})} placeholder="email@rmg.vn" />
+        </FormComp>
+        <FormComp label="Vai trò (Role)">
+          <select className="form-input" value={f.role} onChange={e => setF({...f, role: e.target.value as any})}>
+            <option value="staff">Nhân viên (Staff)</option>
+            <option value="admin">Quản trị viên (Admin)</option>
+          </select>
+        </FormComp>
+        <FormComp label="Trạng thái">
+          <select className="form-input" value={f.status} onChange={e => setF({...f, status: e.target.value as any})}>
+            <option value="approved">Đã phê duyệt (Approved)</option>
+            <option value="pending">Chờ phê duyệt (Pending)</option>
+          </select>
+        </FormComp>
+
+      </div>
+      <div style={{ marginTop: '2.5rem', display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
+        <button className="tab-btn" onClick={onCancel}>Hủy bỏ</button>
+        {f.status === 'pending' && (
+          <button className="tab-btn" style={{ background: '#10b981', color: 'white' }} onClick={() => {
+            const updated = { ...f, status: 'approved' as const };
+            onSave(updated);
+            alert('Đã phê duyệt tài khoản thành công!');
+          }}>
+            ✅ Phê duyệt tài khoản
+          </button>
+        )}
+        <button className="tab-btn active" onClick={() => {
+          if(!f.username || !f.password || !f.fullName) return alert('Vui lòng nhập đủ thông tin!');
+          onSave(f);
+        }}>Lưu thông tin</button>
+      </div>
+
+    </div>
+  );
+}
 
 export default App;
