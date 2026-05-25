@@ -36,6 +36,7 @@ export const mockTechnicians = [
   { id: 'TECH006', name: 'Phạm Văn Đông', role: 'Kỹ thuật viên (TEC)' },
   { id: 'TECH007', name: 'Võ Hoàng Anh', role: 'Kỹ thuật viên (TEC)' },
   { id: 'TECH008', name: 'Nguyễn Văn Trung', role: 'Kỹ thuật viên (TEC)' },
+  { id: 'TECH009', name: 'Đinh Quang Huy IT', role: 'Kỹ thuật viên (IT)' },
 ];
 
 

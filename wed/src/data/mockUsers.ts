@@ -19,16 +19,6 @@ export const mockUsers: UserAccount[] = [
     role: 'admin',
     status: 'approved',
     createdAt: '2024-01-01'
-  },
-  {
-    id: 'U002',
-    username: 'nv01',
-    password: '123456',
-    fullName: 'Nhân viên Kỹ thuật 01',
-    email: 'nv01@rmg.vn',
-    role: 'staff',
-    status: 'approved',
-    createdAt: '2024-01-05'
   }
 ];
 

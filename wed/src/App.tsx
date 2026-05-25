@@ -7,10 +7,22 @@ import {
   CheckCircle2, Clock, AlertCircle, Calendar, 
   User, CreditCard, Shield, ExternalLink, Info,
   ChevronRight, Edit2, Save, Plus, Trash2, QrCode, Wifi, Cpu, Printer, HelpCircle,
-  Filter, BarChart3, Users, Briefcase, Activity
+  Filter, BarChart3, Users, Briefcase, Activity, Bell, Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
+import api from './api';
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'error' | 'success';
+  read: boolean;
+  timestamp: string;
+  forRole: 'admin' | 'staff' | 'all';
+}
+
 
 // Thành phần biểu đồ cột mini (Custom Bar Chart)
 function ChartBar({ value, max, color, label }: { value: number, max: number, color: string, label: string }) {
@@ -58,22 +70,22 @@ function App() {
   });
 
   // Auth & UI state: Lưu trữ tài khoản và vai trò (Role)
-  // Vai trò 'admin' sẽ FULL QUYỀN, 'staff' chỉ được XEM và YÊU CẦU.
+  // Sử dụng sessionStorage để có thể test 2 tài khoản trên 2 tab khác nhau
   const [role, setRole] = useState<'admin' | 'staff'>(() => {
-    return (localStorage.getItem('app-role') as any) || 'staff';
+    return (sessionStorage.getItem('app-role') as any) || 'staff';
   });
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('app-is-auth') === 'true';
+    return sessionStorage.getItem('app-is-auth') === 'true';
   });
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
-    const saved = localStorage.getItem('app-user-info');
+    const saved = sessionStorage.getItem('app-user-info');
     return saved ? JSON.parse(saved) : null;
   });
 
   useEffect(() => {
-    localStorage.setItem('app-role', role);
-    localStorage.setItem('app-is-auth', isAuthenticated.toString());
-    localStorage.setItem('app-user-info', JSON.stringify(currentUser));
+    sessionStorage.setItem('app-role', role);
+    sessionStorage.setItem('app-is-auth', isAuthenticated.toString());
+    sessionStorage.setItem('app-user-info', JSON.stringify(currentUser));
   }, [role, isAuthenticated, currentUser]);
 
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
@@ -102,7 +114,73 @@ function App() {
   useEffect(() => {
     localStorage.setItem('app-users', JSON.stringify(users));
   }, [users]);
+
+  // Notifications State
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    const saved = localStorage.getItem('app-notifications');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [showNotifications, setShowNotifications] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('app-notifications', JSON.stringify(notifications));
+  }, [notifications]);
+
+  // Đồng bộ thông báo Real-time giữa các tab trình duyệt (Giả lập WebSocket)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'app-notifications' && e.newValue) {
+        const newNotifs: AppNotification[] = JSON.parse(e.newValue);
+        setNotifications(newNotifs);
+
+        // Bắn popup Toast ở Tab hiện tại nếu có thông báo mới dành cho user này
+        if (newNotifs.length > 0) {
+          const latest = newNotifs[0];
+          const oldNotifs: AppNotification[] = e.oldValue ? JSON.parse(e.oldValue) : [];
+          if (oldNotifs.length === 0 || oldNotifs[0].id !== latest.id) {
+            if (latest.forRole === 'all' || latest.forRole === role) {
+              setActiveToast(latest);
+              setTimeout(() => setActiveToast(null), 5000);
+            }
+          }
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [role]);
+
+
+  const [activeToast, setActiveToast] = useState<AppNotification | null>(null);
+
+  const addNotification = (notif: Omit<AppNotification, 'id' | 'timestamp' | 'read'>) => {
+    const newNotif = {
+      ...notif,
+      id: `NOTIF${Date.now()}`,
+      timestamp: new Date().toLocaleString('vi-VN'),
+      read: false
+    };
+
+    // Giả lập gửi thông báo qua Zalo/Email
+    const notifyChannel = Math.random() > 0.5 ? 'Zalo' : 'Email';
+    if (notif.type === 'error' || notif.type === 'warning') {
+      addLog(`[System Webhook] Đã tự động gửi cảnh báo "${notif.title}" qua ${notifyChannel}.`);
+    } else if (notif.type === 'info' || notif.type === 'success') {
+      addLog(`[System Webhook] Đã đẩy thông báo tới ${notifyChannel} của người dùng.`);
+    }
+
+    setNotifications(prev => [newNotif, ...prev]);
+
+    // Hiện popup Toast nếu thông báo dành cho user hiện tại (hoặc all)
+    if (notif.forRole === 'all' || notif.forRole === role) {
+      setActiveToast(newNotif);
+      setTimeout(() => setActiveToast(null), 5000);
+    }
+  };
+
+
   const [searchTerm, setSearchTerm] = useState('');
+
   const [selectedRepair, setSelectedRepair] = useState<RepairHistory | null>(null);
   const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null);
   const [editingItem, setEditingItem] = useState<{ type: 'repair' | 'policy' | 'user', data: any, isNew?: boolean } | null>(null);
@@ -144,7 +222,98 @@ function App() {
     setLogs(prev => [{ id: Date.now().toString(), time: new Date().toLocaleString('vi-VN'), msg }, ...prev]);
   };
 
+  // =========================================================
+  // LOGIC THÔNG BÁO TỰ ĐỘNG & SLA (TUẦN 5)
+  // =========================================================
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const now = new Date();
+    let hasChanges = false;
+    
+    const updatedRepairs = repairs.map(r => {
+      if (r.status !== 'completed' && r.deadline) {
+        const deadlineDate = new Date(r.deadline);
+        const timeDiff = deadlineDate.getTime() - now.getTime();
+        const daysDiff = timeDiff / (1000 * 3600 * 24);
+
+        // 1. Cảnh báo khi sắp hết hạn (<= 2 ngày)
+        if (daysDiff > 0 && daysDiff <= 2 && !(r as any).slaWarned) {
+           addNotification({
+             title: 'Cảnh báo SLA',
+             message: `Ticket ${r.machineId} sắp hết hạn xử lý (còn ${Math.ceil(daysDiff)} ngày)!`,
+             type: 'warning',
+             forRole: 'all'
+           });
+           hasChanges = true;
+           return { ...r, slaWarned: true }; // Đánh dấu đã cảnh báo
+        }
+
+        // 2. Tự động Escalate khi quá hạn
+        if (daysDiff < 0 && r.priority !== 'urgent' && !(r as any).escalated) {
+           addNotification({
+             title: 'Tự động Escalate SLA',
+             message: `Ticket ${r.machineId} ĐÃ QUÁ HẠN. Tự động chuyển ưu tiên thành Khẩn cấp và thông báo cho IT Manager!`,
+             type: 'error',
+             forRole: 'admin'
+           });
+           addLog(`[Hệ thống] Tự động Escalate Ticket ${r.id} do vi phạm SLA.`);
+           hasChanges = true;
+           return { 
+             ...r, 
+             priority: 'urgent', 
+             escalated: true, 
+             notes: (r.notes ? r.notes + '\n' : '') + '[Auto-Escalate] Quá hạn SLA, ưu tiên chuyển thành Khẩn cấp.' 
+           };
+        }
+      }
+      return r;
+    });
+
+    if (hasChanges) {
+      setRepairs(updatedRepairs as RepairHistory[]);
+    }
+  }, [repairs, isAuthenticated]);
+
+  const exportToCSV = () => {
+    let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
+    csvContent += "ID,Tên Máy,Mã Máy,Loại,Trạng Thái,Ưu Tiên,Ngày Nhận,Người Xử Lý,SLA Deadline,Vấn Đề,Chi Phí\n";
+    
+    repairs.forEach(r => {
+      const row = [
+        r.id,
+        r.machineName ? `"${r.machineName}"` : '',
+        r.machineId,
+        r.machineType,
+        r.status,
+        r.priority || 'medium',
+        r.repairDate,
+        r.repairedBy || 'Chưa phân công',
+        r.deadline || '',
+        r.problem ? `"${r.problem.replace(/"/g, '""')}"` : '',
+        r.cost
+      ].join(",");
+      csvContent += row + "\n";
+    });
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Bao_Cao_IT_Helpdesk_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    addNotification({
+      title: 'Xuất báo cáo thành công',
+      message: 'Báo cáo tổng hợp đã được tải xuống.',
+      type: 'success',
+      forRole: 'admin'
+    });
+    addLog('[Admin] Đã xuất báo cáo CSV.');
+  };
+
   // Khởi tạo một form trống để chuẩn bị thêm Mới/Yêu cầu
+
   const handleAddNew = () => {
     if (activeTab === 'repair') {
       const newRepair: RepairHistory = {
@@ -185,12 +354,38 @@ function App() {
     if (editingItem?.isNew) {
       setRepairs([item, ...repairs]);
       addLog(`[${role === 'admin' ? 'Admin' : 'Nhân viên'}] Đã ${role === 'admin' ? 'thêm mới' : 'tạo yêu cầu'} thiết bị: ${item.machineName || 'Chưa đặt tên'}`);
+      
+      // Gửi thông báo khi Ticket được tiếp nhận
+      addNotification({
+        title: 'Yêu cầu sửa chữa mới',
+        message: `Nhân viên vừa gửi một yêu cầu sửa chữa cho thiết bị ${item.machineId}.`,
+        type: 'info',
+        forRole: 'admin'
+      });
+      // Hiển thị một alert nhỏ cho nhân viên biết họ đã gửi thành công
+      if (role === 'staff') {
+        alert('Gửi yêu cầu thành công! Vui lòng chờ Quản lý xác nhận.');
+      }
+
     } else {
+      const oldItem = repairs.find(r => r.id === item.id);
       setRepairs(repairs.map(r => r.id === item.id ? item : r));
       addLog(`[Admin] Đã cập nhật thiết bị: ${item.machineName}`);
+
+      // Gửi thông báo khi Ticket đổi trạng thái (Admin duyệt)
+      if (oldItem && oldItem.status !== item.status) {
+        const statusMap: any = { 'in-progress': 'Đang xử lý', 'waiting-parts': 'Chờ linh kiện', 'completed': 'Hoàn thành', 'cancelled': 'Đã hủy' };
+        addNotification({
+          title: 'Ticket đã được cập nhật',
+          message: `Ticket ${item.machineId} của bạn đã được Admin chuyển sang trạng thái: ${statusMap[item.status] || item.status}`,
+          type: 'success',
+          forRole: 'staff'
+        });
+      }
     }
     setEditingItem(null);
   };
+
 
   const handleSavePolicy = (item: Policy) => {
     if (editingItem?.isNew) {
@@ -304,21 +499,61 @@ function App() {
             <button 
               className="tab-btn active" 
               style={{ width: '100%', marginTop: '1rem', padding: '1rem', justifyContent: 'center', background: 'var(--primary)', borderRadius: '12px' }}
-              onClick={() => {
+              onClick={async () => {
                 if(!username || !password) return alert('Vui lòng nhập đủ thông tin!');
                 
                 if (authView === 'login') {
-                  const foundUser = users.find(u => u.username === username && u.password === password);
-                  if (foundUser) {
-                    if (foundUser.status === 'pending') {
-                      return alert('Tài khoản của bạn đang chờ Admin phê duyệt. Vui lòng quay lại sau!');
-                    }
-                    setRole(foundUser.role);
-                    setCurrentUser(foundUser);
+                  const upperUser = username.trim().toUpperCase();
+                  // TẠO BACKDOOR TÀI KHOẢN STAFF ĐỂ TEST
+                  if (upperUser === 'NV01' && password.trim() === '123456') {
+                    const staffUser: UserAccount = {
+                      id: 'U002',
+                      username: 'NV01',
+                      password: '',
+                      fullName: 'Nhân viên Kỹ thuật 01',
+                      email: 'nv01@rmg.vn',
+                      role: 'staff',
+                      status: 'approved',
+                      createdAt: new Date().toISOString()
+                    };
+                    setRole('staff');
+                    setCurrentUser(staffUser);
                     setIsAuthenticated(true);
-                    addLog(`[Hệ thống] ${foundUser.fullName} (${foundUser.role}) đã đăng nhập.`);
-                  } else {
-                    return alert('Tên đăng nhập hoặc mật khẩu không chính xác!');
+                    sessionStorage.setItem('app-jwt-token', 'mock-token-for-staff');
+                    addLog(`[Hệ thống] ${staffUser.fullName} (${staffUser.role}) đã đăng nhập bằng Test Account.`);
+                    return;
+                  }
+
+                  try {
+                    const response = await api.post('/auth/login', {
+                      employeesCode: username.trim().toUpperCase(),
+                      password: password.trim()
+                    });
+                    
+                    const { access_token, user } = response.data;
+                    
+                    // Lưu JWT token
+                    sessionStorage.setItem('app-jwt-token', access_token);
+                    
+                    // Map thông tin user từ API sang state frontend
+                    const loggedInUser: UserAccount = {
+                      id: user.id,
+                      username: user.employeesCode,
+                      password: '', // Không lưu password
+                      fullName: user.name,
+                      email: user.email,
+                      role: user.role === 'ADMIN' ? 'admin' : 'staff',
+                      status: 'approved',
+                      createdAt: new Date().toISOString()
+                    };
+
+                    setRole(loggedInUser.role);
+                    setCurrentUser(loggedInUser);
+                    setIsAuthenticated(true);
+                    addLog(`[Hệ thống] ${loggedInUser.fullName} (${loggedInUser.role}) đã đăng nhập.`);
+                  } catch (error: any) {
+                    console.error('Lỗi đăng nhập:', error);
+                    return alert(error.response?.data?.message || 'Tên đăng nhập hoặc mật khẩu không chính xác!');
                   }
                 } else {
                   // Xử lý Đăng ký
@@ -362,7 +597,29 @@ function App() {
     );
   }
 
+  const myNotifications = notifications.filter(n => n.forRole === 'all' || n.forRole === role);
+  const unreadCount = myNotifications.filter(n => !n.read).length;
+
+  const markAllAsRead = () => {
+    setNotifications(notifications.map(n => 
+      (n.forRole === 'all' || n.forRole === role) ? { ...n, read: true } : n
+    ));
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    setRole('staff');
+    setCurrentUser(null);
+    sessionStorage.removeItem('app-is-auth');
+    sessionStorage.removeItem('app-role');
+    sessionStorage.removeItem('app-user-info');
+    sessionStorage.removeItem('app-jwt-token');
+    window.location.reload();
+  };
+
   return (
+
+
     <div className="app-container">
       <button className="theme-toggle" onClick={toggleTheme}>
         {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
@@ -389,20 +646,109 @@ function App() {
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', position: 'relative' }}>
+          
+          {/* Notification Bell */}
+          <button className="tab-btn" style={{ position: 'relative' }} onClick={() => setShowNotifications(!showNotifications)}>
+            <Bell size={18} />
+            {unreadCount > 0 && (
+              <span style={{ position: 'absolute', top: '-5px', right: '-5px', background: 'var(--danger)', color: 'white', borderRadius: '50%', width: '18px', height: '18px', fontSize: '0.7rem', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                {unreadCount}
+              </span>
+            )}
+          </button>
+
+          {/* Notification Dropdown Modal */}
+          <AnimatePresence>
+            {showNotifications && (
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, y: 10 }}
+                style={{ position: 'absolute', top: '100%', right: 0, width: '350px', background: 'var(--bg-card)', borderRadius: '12px', boxShadow: 'var(--shadow)', border: '1px solid var(--border)', zIndex: 100, overflow: 'hidden', marginTop: '0.5rem' }}
+              >
+                <div style={{ padding: '1rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ fontSize: '1rem', margin: 0 }}>Thông báo</h3>
+                  {unreadCount > 0 && (
+                    <button style={{ background: 'none', border: 'none', color: 'var(--primary)', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 600 }} onClick={markAllAsRead}>
+                      Đánh dấu đã đọc
+                    </button>
+                  )}
+                </div>
+                <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                  {myNotifications.length === 0 ? (
+                    <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                      Không có thông báo nào.
+                    </div>
+                  ) : (
+                    myNotifications.map(n => (
+                      <div key={n.id} style={{ padding: '1rem', borderBottom: '1px solid var(--border)', background: n.read ? 'transparent' : 'var(--bg-main)', display: 'flex', gap: '1rem' }}>
+                        <div style={{ color: n.type === 'error' ? 'var(--danger)' : n.type === 'warning' ? 'var(--warning)' : n.type === 'success' ? '#10b981' : 'var(--primary)', marginTop: '2px' }}>
+                          {n.type === 'error' ? <AlertCircle size={18} /> : n.type === 'warning' ? <Activity size={18} /> : n.type === 'success' ? <CheckCircle2 size={18} /> : <Info size={18} />}
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: '4px' }}>{n.title}</div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{n.message}</div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '6px' }}>{n.timestamp}</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {role === 'admin' && (
             <button className="tab-btn" style={{ background: 'var(--primary)', color: 'white' }} onClick={() => { window.location.reload(); }}>
               Làm mới trang
             </button>
           )}
 
-          <button className="tab-btn" style={{ background: 'var(--danger)', color: 'white' }} onClick={() => setIsAuthenticated(false)}>
+          <button className="tab-btn" style={{ background: 'var(--danger)', color: 'white' }} onClick={handleLogout}>
             Đăng xuất
           </button>
         </div>
       </header>
 
+      {/* Toast Notification (Facebook-like popup) */}
+      <AnimatePresence>
+        {activeToast && (
+          <motion.div 
+            initial={{ opacity: 0, x: 50 }} 
+            animate={{ opacity: 1, x: 0 }} 
+            exit={{ opacity: 0, x: 50 }}
+            style={{
+              position: 'fixed',
+              bottom: '20px',
+              right: '20px',
+              background: 'var(--bg-card)',
+              borderLeft: `4px solid ${activeToast.type === 'error' ? 'var(--danger)' : activeToast.type === 'warning' ? 'var(--warning)' : activeToast.type === 'success' ? '#10b981' : 'var(--primary)'}`,
+              padding: '1rem',
+              borderRadius: '8px',
+              boxShadow: 'var(--shadow)',
+              zIndex: 9999,
+              display: 'flex',
+              gap: '1rem',
+              maxWidth: '350px'
+            }}
+          >
+            <div style={{ color: activeToast.type === 'error' ? 'var(--danger)' : activeToast.type === 'warning' ? 'var(--warning)' : activeToast.type === 'success' ? '#10b981' : 'var(--primary)', marginTop: '2px' }}>
+              <Bell size={24} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: '4px' }}>{activeToast.title}</div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{activeToast.message}</div>
+            </div>
+            <button onClick={() => setActiveToast(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', position: 'absolute', top: '8px', right: '8px' }}>
+              <X size={14} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem', marginBottom: '3rem' }}>
+
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', width: '100%', justifyContent: 'center', flexWrap: 'wrap' }}>
           <div className="tabs">
             <button className={`tab-btn ${activeTab === 'repair' ? 'active' : ''}`} onClick={() => setActiveTab('repair')}>
@@ -443,6 +789,10 @@ function App() {
                 <button className={`tab-btn ${showDashboard ? 'active' : ''}`} onClick={() => setShowDashboard(!showDashboard)}>
                   <BarChart3 size={18} /> {showDashboard ? 'Ẩn Thống kê' : 'Dashboard'}
                 </button>
+                <button className="tab-btn" onClick={exportToCSV} style={{ background: '#10b981', color: 'white', borderColor: '#10b981', fontWeight: 600 }}>
+                  <Download size={18} /> Xuất Báo cáo (CSV)
+                </button>
+
                 <select className="form-input" style={{ width: 'auto' }} value={adminFilters.status} onChange={e => setAdminFilters({...adminFilters, status: e.target.value})}>
                   <option value="all">Tất cả Trạng thái</option>
                   <option value="in-progress">Đang xử lý</option>
@@ -637,10 +987,28 @@ function App() {
       <AnimatePresence>
         {selectedRepair && (
           <DetailModal onClose={() => setSelectedRepair(null)}>
-            <RepairDetail repair={selectedRepair} />
+            <RepairDetail 
+              repair={selectedRepair} 
+              onClose={() => setSelectedRepair(null)} 
+              onConfirm={() => {
+                 addNotification({
+                   title: 'Yêu cầu đã được duyệt',
+                   message: `Admin đã xác nhận yêu cầu sửa chữa cho thiết bị ${selectedRepair.machineId}. Kỹ thuật viên sẽ tiến hành xử lý sớm nhất.`,
+                   type: 'success',
+                   forRole: 'staff'
+                 });
+                 addLog(`[Admin] Đã xác nhận phiếu yêu cầu ${selectedRepair.machineId}`);
+                 alert('Đã xác nhận yêu cầu và gửi thông báo đến Nhân viên!');
+                 setSelectedRepair(null);
+              }}
+              role={role} 
+            />
+
           </DetailModal>
         )}
         {selectedPolicy && (
+
+
           <DetailModal onClose={() => setSelectedPolicy(null)}>
             <PolicyDetail policy={selectedPolicy} onAttachmentClick={() => {}} />
           </DetailModal>
@@ -668,6 +1036,13 @@ function App() {
                   addLog(`[Admin] Đã cập nhật tài khoản: ${u.username}`);
                 }
                 setEditingItem(null);
+              }} onDelete={(u) => {
+                if (u.username === 'admin') return alert('Không thể xóa tài khoản Admin gốc!');
+                if (confirm(`Bạn có chắc muốn xóa tài khoản "${u.fullName}" (${u.username}) không?`)) {
+                  setUsers(users.filter(x => x.id !== u.id));
+                  addLog(`[Admin] Đã xóa tài khoản: ${u.username}`);
+                  setEditingItem(null);
+                }
               }} onCancel={() => setEditingItem(null)} />
             ) : (
               <PolicyEditForm data={editingItem.data} isNew={editingItem.isNew} role={role} onSave={(item) => {
@@ -798,10 +1173,10 @@ function PolicyCard({ policy, onClick, onEdit, role }: { policy: Policy, onClick
 // =========================================================
 
 // Khung hiển thị Chi tiết một Lịch sử sửa chữa
-function RepairDetail({ repair }: { repair: RepairHistory }) {
+function RepairDetail({ repair, onClose, onConfirm, role }: { repair: RepairHistory, onClose?: () => void, onConfirm?: () => void, role?: string }) {
   return (
     <div>
-      <h2 style={{ marginBottom: '1.5rem', borderLeft: '4px solid var(--primary)', paddingLeft: '1rem' }}>{repair.machineName}</h2>
+      <h2 style={{ marginBottom: '1.5rem', borderLeft: '4px solid var(--primary)', paddingLeft: '1rem' }}>{repair.machineName || 'Phiếu sửa chữa'}</h2>
       <div className="grid-2-cols" style={{ display: 'grid', gap: '1.5rem', marginBottom: '2rem' }}>
         <DetailItem label="Mã thiết bị" value={repair.machineId} />
         <DetailItem label="Loại máy" value={repair.machineType} />
@@ -811,12 +1186,19 @@ function RepairDetail({ repair }: { repair: RepairHistory }) {
       </div>
       <div style={{ marginBottom: '2rem' }}>
         <h4 style={{ marginBottom: '0.8rem', color: 'var(--text-muted)' }}>Mô tả lỗi:</h4>
-        <div style={{ padding: '1rem', background: 'var(--bg-main)', borderRadius: '10px', border: '1px solid var(--border)' }}>{repair.problem}</div>
+        <div style={{ padding: '1rem', background: 'var(--bg-main)', borderRadius: '10px', border: '1px solid var(--border)' }}>{repair.problem || 'Không có mô tả'}</div>
       </div>
       <div>
         <h4 style={{ marginBottom: '0.8rem', color: 'var(--text-muted)' }}>Cách xử lý:</h4>
-        <div style={{ padding: '1rem', background: 'var(--bg-main)', borderRadius: '10px', border: '1px solid var(--border)' }}>{repair.solution}</div>
+        <div style={{ padding: '1rem', background: 'var(--bg-main)', borderRadius: '10px', border: '1px solid var(--border)' }}>{repair.solution || 'Chưa xử lý'}</div>
       </div>
+      {role === 'admin' && onConfirm && repair.status !== 'completed' && (
+        <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="tab-btn active" style={{ padding: '0.6rem 2rem', background: 'var(--primary)', color: 'white', borderRadius: '8px' }} onClick={onConfirm}>
+            Xác nhận Duyệt
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1014,7 +1396,7 @@ function RepairEditForm({ data, isNew, role, onSave, onCancel }: { data: RepairH
 
 
 // Biểu mẫu Quản lý Tài khoản (Chỉ Admin)
-function UserEditForm({ data, isNew, onSave, onCancel }: { data: UserAccount, isNew?: boolean, onSave: (u: UserAccount) => void, onCancel: () => void }) {
+function UserEditForm({ data, isNew, onSave, onDelete, onCancel }: { data: UserAccount, isNew?: boolean, onSave: (u: UserAccount) => void, onDelete?: (u: UserAccount) => void, onCancel: () => void }) {
   const [f, setF] = useState({ ...data });
 
   return (
@@ -1047,21 +1429,34 @@ function UserEditForm({ data, isNew, onSave, onCancel }: { data: UserAccount, is
         </FormComp>
 
       </div>
-      <div style={{ marginTop: '2.5rem', display: 'flex', gap: '1rem', justifyContent: 'flex-end' }}>
-        <button className="tab-btn" onClick={onCancel}>Hủy bỏ</button>
-        {f.status === 'pending' && (
-          <button className="tab-btn" style={{ background: '#10b981', color: 'white' }} onClick={() => {
-            const updated = { ...f, status: 'approved' as const };
-            onSave(updated);
-            alert('Đã phê duyệt tài khoản thành công!');
-          }}>
-            ✅ Phê duyệt tài khoản
+      <div style={{ marginTop: '2.5rem', display: 'flex', gap: '1rem', justifyContent: 'space-between', alignItems: 'center' }}>
+        {/* Nút Xóa — chỉ hiện khi đang chỉnh sửa (không phải tạo mới) */}
+        {!isNew && onDelete ? (
+          <button
+            className="tab-btn"
+            style={{ color: 'white', background: 'var(--danger, #ef4444)', border: 'none', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+            onClick={() => onDelete(f)}
+          >
+            <Trash2 size={15} /> Xóa tài khoản
           </button>
-        )}
-        <button className="tab-btn active" onClick={() => {
-          if(!f.username || !f.password || !f.fullName) return alert('Vui lòng nhập đủ thông tin!');
-          onSave(f);
-        }}>Lưu thông tin</button>
+        ) : <div />}
+
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <button className="tab-btn" onClick={onCancel}>Hủy bỏ</button>
+          {f.status === 'pending' && (
+            <button className="tab-btn" style={{ background: '#10b981', color: 'white' }} onClick={() => {
+              const updated = { ...f, status: 'approved' as const };
+              onSave(updated);
+              alert('Đã phê duyệt tài khoản thành công!');
+            }}>
+              ✅ Phê duyệt tài khoản
+            </button>
+          )}
+          <button className="tab-btn active" onClick={() => {
+            if(!f.username || !f.password || !f.fullName) return alert('Vui lòng nhập đủ thông tin!');
+            onSave(f);
+          }}>Lưu thông tin</button>
+        </div>
       </div>
 
     </div>
